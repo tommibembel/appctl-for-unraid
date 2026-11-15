@@ -2,7 +2,7 @@
 /*
  * ca-install – install Community Applications from the command line
  * Copyright (C) 2026 tommibembel
- * SPDX-License-Identifier: GPL-2.0-or-later
+ * SPDX-License-Identifier: GPL-2.0-only
  *
  * Helper process: runs an ORIGINAL WebUI action script (e.g. CA exec.php or dockerMan
  * UpdateConfig.php) exactly as if the WebUI had sent a POST with these fields. It runs in

@@ -86,5 +86,6 @@ Technology, Bergware and contributors. `ca-install` only calls and mirrors their
 
 ## License
 
-GPL-2.0-or-later – see [LICENSE](LICENSE). Same family as the Unraid webGUI and Community
-Applications code it builds on.
+GPL-2.0-only – see [LICENSE](LICENSE). The install logic mirrors parts of dockerMan (Unraid
+webGUI, "GNU General Public License version 2") and Community Applications ("GPLv2"), so this
+project uses the same license.

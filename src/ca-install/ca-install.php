@@ -2,7 +2,7 @@
 /*
  * ca-install – install Community Applications from the command line
  * Copyright (C) 2026 tommibembel
- * SPDX-License-Identifier: GPL-2.0-or-later
+ * SPDX-License-Identifier: GPL-2.0-only
  *
  * Installs Docker apps from the Unraid Community Applications (CA) store from
  * the command line, producing the same result as "Install" -> "Apply" in the WebUI.
