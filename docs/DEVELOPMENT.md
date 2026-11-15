@@ -94,14 +94,15 @@ that POST → `runCreateXML()`.
   `webui-info` entry of a container; a container renamed outside dockerMan leaves one behind with
   an outdated update status. Dropped before starting the new container.
 
-## Safety nets against Unraid changes
+## Unraid / CA versions
 
-- `CAI_TESTED_UNRAID` / `CAI_TESTED_CA`: `install` refuses untested Unraid versions
-  (`--ignore-version` overrides); an untested CA version is a warning.
-- `selfCheckPostToXML()`: reads the source of the installed `postToXML()` via reflection and
-  compares every `$post['…']` key with `CAI_KNOWN_POST_KEYS`. A new form field in a future Unraid
-  stops the install (`DOCKERMAN_CHANGED`) instead of producing an incomplete template.
-- `loadDockerMan()` checks that all original functions exist.
+There are deliberately **no version checks**: they would need maintenance with every Unraid
+release, while the worst case without them is small (the tool fails with an error, or a template
+differs in a detail from a WebUI install and can be fixed with *Edit*; `--dry-run` shows
+everything beforehand). The README states the versions it was tested with.
+
+The only check is `loadDockerMan()`: if a dockerMan function the tool calls does not exist, it
+stops with `DOCKERMAN_CHANGED` instead of a PHP fatal error.
 
 ## Verifying on a new Unraid version
 
@@ -115,7 +116,7 @@ that POST → `runCreateXML()`.
    in the form.
 3. Real install of a harmless app; check in the WebUI: icon, update status (*up-to-date*),
    *Edit* shows the same values, *Apps → Installed Apps* lists it.
-4. Add the version to `CAI_TESTED_UNRAID` / `CAI_TESTED_CA`, add a changelog entry, tag a release.
+4. Update the tested versions in the README (Limitations), add a changelog entry, tag a release.
 
 ## Local testing
 

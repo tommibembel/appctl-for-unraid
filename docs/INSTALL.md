@@ -94,8 +94,7 @@ and pull request: PHP syntax check, build, and a check that the embedded files c
 To publish a version:
 
 1. Add a section `###YYYY.MM.DD` at the top of [`plugin/CHANGES.md`](../plugin/CHANGES.md).
-2. If tested on a new Unraid / CA version, add it to `CAI_TESTED_UNRAID` / `CAI_TESTED_CA` in
-   `src/ca-install/ca-install.php`.
+2. If tested on a new Unraid / CA version, update the tested versions in the README.
 3. Tag and push: `git tag 2026.11.16 && git push origin 2026.11.16`.
 
 The Action then creates a GitHub release with `ca-install.plg`. The plugin's `pluginURL` points

@@ -42,9 +42,8 @@ Always read `warnings` and pass relevant ones on to the user.
 6. **Do not edit `my-*.xml` files or run `docker run` yourself.** Everything the WebUI form can do
    is available as an option (`--container`, `--set`, `--set KEY.prop`, `--add`, `--remove`,
    `--autostart`). If something is not possible, tell the user instead of working around the tool.
-7. **Environment errors (`exit 7`) are not yours to fix.** `UNTESTED_VERSION` and
-   `DOCKERMAN_CHANGED` mean the Unraid internals may differ: report to the user; use
-   `--ignore-version` only if the user explicitly agrees.
+7. **Environment errors (`exit 7`) are not yours to fix.** Report them to the user.
+   `DOCKERMAN_CHANGED` means this Unraid version lacks a function the tool needs.
 
 ## Workflow
 
@@ -140,9 +139,10 @@ Why not something else:
   WebUI with the same input.
 - Never guess: ambiguous app → list and stop; required value missing → stop with a clear message;
   name already used by a container or template → stop unless `--replace`.
-- Fail clearly instead of installing halfway. Check versions and internals defensively
-  (`CAI_TESTED_UNRAID`, `selfCheckPostToXML()`); these are internal, non-public functions that can
-  change with any Unraid / CA release.
+- Fail clearly instead of installing halfway.
+- No version gates or checks that need maintenance with every Unraid release. The README states
+  the tested versions; using other versions is up to the user. Only check what the tool cannot
+  work without (e.g. that the called functions exist).
 - Machine-readable first: every new behaviour needs `--json` output and, for errors, a stable
   error code and exit code (documented in [USAGE.md](docs/USAGE.md)).
 - Keep it a single small plugin: files embedded in the `.plg`, no settings page, no daemon.

@@ -21,10 +21,6 @@
 
 const CAI_VERSION = '0.1.0-dev';
 
-// Versions this tool was verified against. Other Unraid versions are refused for
-// `install` unless --ignore-version is given (form logic is replicated, see above).
-const CAI_TESTED_UNRAID = ['7.1.2'];
-const CAI_TESTED_CA     = ['2026.07.21'];
 
 const CAI_DOCROOT    = '/usr/local/emhttp';
 const CAI_FEED_CACHE = '/tmp/community.applications/tempFiles/templates_new.json';
@@ -103,7 +99,6 @@ except Tailscale):
   --autostart                enable autostart after install (Docker page toggle)
   --autostart-wait <sec>     autostart wait period
   --replace                  allow replacing an existing container/template with the same name
-  --ignore-version           run on an untested Unraid version
   --json                     machine-readable output
 
 Order of field operations: --remove, then --add, then --set.
@@ -123,7 +118,7 @@ $GLOBALS['CAI_VERSION_STR'] = CAI_VERSION;
 function parseArgs(array $argv): array {
   $o = ['cmd' => null, 'args' => [], 'json' => false, 'limit' => 20, 'name' => null, 'set' => [],
         'container' => [], 'add' => [], 'remove' => [], 'network' => null, 'ip' => null,
-        'replace' => false, 'dry' => false, 'yes' => false, 'ignoreVersion' => false,
+        'replace' => false, 'dry' => false, 'yes' => false,
         'autostart' => false, 'autostartWait' => null];
   $valueOpts = ['--limit' => 'limit', '--name' => 'name', '--network' => 'network', '--ip' => 'ip',
                 '--autostart-wait' => 'autostartWait'];
@@ -140,7 +135,6 @@ function parseArgs(array $argv): array {
       case '--yes': case '-y': $o['yes'] = true; break;
       case '--replace': $o['replace'] = true; break;
       case '--autostart': $o['autostart'] = true; break;
-      case '--ignore-version': $o['ignoreVersion'] = true; break;
       case '--help': case '-h': $o['cmd'] = 'help'; break;
       default:
         if (isset($kvOpts[$a])) {
@@ -192,22 +186,9 @@ function caVersion(): string {
   return 'unknown';
 }
 
-function checkEnvironment(bool $forInstall, bool $ignoreVersion): void {
+function checkEnvironment(): void {
   if (!is_file(CAI_CA_EXEC)) {
     throw new CaiError('CA_NOT_INSTALLED', 'Community Applications plugin is not installed', EXIT_ENVIRONMENT);
-  }
-  $unraid = unraidVersion();
-  $ca = caVersion();
-  if (!in_array($unraid, CAI_TESTED_UNRAID, true)) {
-    $msg = "Unraid $unraid is not tested (tested: ".implode(', ', CAI_TESTED_UNRAID).")";
-    if ($forInstall && !$ignoreVersion) {
-      throw new CaiError('UNTESTED_VERSION', "$msg. Use --ignore-version to try anyway and compare with a WebUI install.", EXIT_ENVIRONMENT,
-        ['unraid' => $unraid, 'tested' => CAI_TESTED_UNRAID]);
-    }
-    warn($msg);
-  }
-  if (!in_array($ca, CAI_TESTED_CA, true)) {
-    warn("Community Applications $ca is not tested (tested: ".implode(', ', CAI_TESTED_CA).")");
   }
 }
 
@@ -329,37 +310,8 @@ function cmdInfo(array $o): array {
 # Install
 #################################################################
 
-/**
- * All form fields postToXML() reads in Unraid 7.1.2 (Helpers.php lines 64-140). formPost() fills the
- * cont..., conf..., netCONT and TSstatedir ones; the other TS* fields only matter with Tailscale enabled,
- * which is refused. If a future Unraid reads a field not listed here, we stop instead of writing
- * an incomplete template.
- */
-const CAI_KNOWN_POST_KEYS = ['contName', 'contRepository', 'contRegistry', 'netCONT', 'contNetwork', 'contMyIP',
-  'contShell', 'contPrivileged', 'contSupport', 'contProject', 'contOverview', 'contCategory', 'contWebUI',
-  'contTemplateURL', 'contIcon', 'contExtraParams', 'contPostArgs', 'contCPUset', 'contDonateText', 'contDonateLink',
-  'contRequires', 'confName', 'confType', 'confValue', 'confTarget', 'confDefault', 'confMode', 'confDescription',
-  'confDisplay', 'confRequired', 'confMask', 'contTailscale', 'TSisexitnode', 'TShostname', 'TSexitnodeip', 'TSssh',
-  'TSuserspacenetworking', 'TSallowlanaccess', 'TSserve', 'TSwebui', 'TSserveport', 'TSservetarget',
-  'TSservelocalpath', 'TSserveprotocol', 'TSserveprotocolport', 'TSservepath', 'TSdaemonparams', 'TSextraparams',
-  'TSroutes', 'TSacceptroutes', 'TStroubleshooting', 'TSstatedir'];
-
-function selfCheckPostToXML(bool $ignoreVersion): void {
-  $rf = new ReflectionFunction('postToXML');
-  $lines = file($rf->getFileName());
-  $src = implode('', array_slice($lines, $rf->getStartLine() - 1, $rf->getEndLine() - $rf->getStartLine() + 1));
-  preg_match_all("/\\\$post\\['([A-Za-z0-9_]+)'\\]/", $src, $m);
-  $unknown = array_values(array_diff(array_unique($m[1]), CAI_KNOWN_POST_KEYS));
-  if (!$m[1]) $unknown = ['(could not parse postToXML)'];
-  if ($unknown) {
-    $msg = 'dockerMan postToXML() reads form fields this tool does not know: '.implode(', ', $unknown);
-    if (!$ignoreVersion) throw new CaiError('DOCKERMAN_CHANGED', "$msg. The result could differ from a WebUI install.", EXIT_ENVIRONMENT, ['unknown_fields' => $unknown]);
-    warn($msg);
-  }
-}
-
 /** Load dockerMan exactly like CreateDocker.php does (lines 14-25). */
-function loadDockerMan(bool $ignoreVersion = false): void {
+function loadDockerMan(): void {
   global $docroot, $var, $subnet, $custom, $driver, $dockercfg, $dockerManPaths, $DockerClient, $DockerUpdate, $DockerTemplates;
   $docroot = CAI_DOCROOT;
   $_SERVER['DOCUMENT_ROOT'] = $docroot;
@@ -374,10 +326,9 @@ function loadDockerMan(bool $ignoreVersion = false): void {
   $subnet = DockerUtil::network($custom);
   foreach (['postToXML', 'xmlToVar', 'xmlToCommand', 'pullImage', 'stopContainer', 'removeContainer', 'addRoute'] as $fn) {
     if (!function_exists($fn)) {
-      throw new CaiError('DOCKERMAN_CHANGED', "dockerMan function $fn() not found – Unraid internals changed", EXIT_ENVIRONMENT);
+      throw new CaiError('DOCKERMAN_CHANGED', "dockerMan function $fn() not found – this Unraid version is not compatible", EXIT_ENVIRONMENT);
     }
   }
-  selfCheckPostToXML($ignoreVersion);
   if (!is_file('/var/run/dockerd.pid')) {
     throw new CaiError('DOCKER_NOT_RUNNING', 'Docker service is not running', EXIT_ENVIRONMENT);
   }
@@ -838,14 +789,14 @@ function nameConflicts(string $name): array {
  * Shared by `options` and `install`: runs the whole WebUI pipeline up to (not including) "Apply"
  * and collects problems instead of failing on them. Usage errors (bad --set/--network) still throw.
  */
-function prepare(array $o, bool $strictVersion): array {
+function prepare(array $o): array {
   if (count($o['args']) !== 1) throw new CaiError('USAGE', "{$o['cmd']} needs exactly one app", EXIT_USAGE);
-  checkEnvironment($strictVersion, $o['ignoreVersion']);
+  checkEnvironment();
   $t = resolveApp(loadFeed(), $o['args'][0]);
   if (!empty($t['Deprecated'])) warn("App '{$t['Name']}' is marked as deprecated in CA");
   if (isset($t['Compatible']) && empty($t['Compatible'])) warn("App '{$t['Name']}' is marked as incompatible with this Unraid version");
 
-  loadDockerMan($o['ignoreVersion']);
+  loadDockerMan();
   $name = $o['name'] ?? str_replace(' ', '-', $t['Name']);   // createXML: str_replace(" ","-",Name)
   $name = preg_replace('/\s+/', '', $name);
   if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.\-]+$/', $name)) {   // pattern of input[name=contName]
@@ -863,7 +814,7 @@ function prepare(array $o, bool $strictVersion): array {
 /** `options`: the "Add Container" form as data, so an agent can ask the user what to change. */
 function cmdOptions(array $o): array {
   global $subnet, $driver;
-  $ctx = prepare($o, false);
+  $ctx = prepare($o);
   $post = $ctx['post'];
   $problems = [];
   if ($ctx['name_conflicts'] && !$o['replace']) {
@@ -940,7 +891,7 @@ function cmdInstall(array $o): array {
   if (!$o['dry'] && !$o['yes']) {
     throw new CaiError('CONFIRMATION_REQUIRED', 'Nothing done. Preview with --dry-run, then install with --yes.', EXIT_CONFIRM);
   }
-  $ctx = prepare($o, true);
+  $ctx = prepare($o);
   $name = $ctx['name'];
   if ($ctx['name_conflicts'] && !$o['replace']) {
     throw new CaiError('NAME_CONFLICT', "Name '$name' already in use: ".implode(', ', $ctx['name_conflicts']).'. Use --name or --replace.',
@@ -1113,8 +1064,10 @@ function printHuman(string $cmd, array $d): void {
       if (!$d['dry_run']) echo "\n".implode("\n", $d['steps'])."\nContainer ID: {$d['container_id']}\n";
       break;
     case 'version':
-      printf("ca-install %s\nUnraid %s (tested: %s)\nCommunity Applications %s (tested: %s)\n", $d['ca_install'],
-        $d['unraid'], implode(', ', CAI_TESTED_UNRAID), $d['community_applications'], implode(', ', CAI_TESTED_CA));
+      printf("ca-install %s
+Unraid %s
+Community Applications %s
+", $d['ca_install'], $d['unraid'], $d['community_applications']);
       break;
   }
 }
@@ -1127,8 +1080,8 @@ function main(array $argv): int {
     $cmd = $o['cmd'] ?? 'help';
     switch ($cmd) {
       case 'help':    fwrite(STDOUT, usage()); return EXIT_OK;
-      case 'search':  checkEnvironment(false, true); $data = cmdSearch($o); break;
-      case 'info':    checkEnvironment(false, true); $data = cmdInfo($o); break;
+      case 'search':  checkEnvironment(); $data = cmdSearch($o); break;
+      case 'info':    checkEnvironment(); $data = cmdInfo($o); break;
       case 'options': $data = cmdOptions($o); break;
       case 'install': $data = cmdInstall($o); break;
       case 'version': $data = ['ca_install' => CAI_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()]; break;

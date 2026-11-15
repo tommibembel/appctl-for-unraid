@@ -26,7 +26,7 @@ For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installati
 | `ca-install options <app> [options]` | The *Add Container* form as data: every setting **already adapted to this server** (appdata path, network, …) plus problems (missing values, port conflicts, name conflicts) and `ready: true/false`. | no ¹ |
 | `ca-install install <app> [options] --dry-run` | Shows the resulting `my-*.xml` and the `docker run` command. | no ¹ |
 | `ca-install install <app> [options] --yes` | Really installs: pull image, write template, start container, optional autostart. | **yes** |
-| `ca-install version` | Tool, Unraid and CA versions and the tested versions. | no |
+| `ca-install version` | Tool, Unraid and CA versions. | no |
 | `ca-install --help` | Short help. | no |
 
 ¹ Like the WebUI's *Install* button, CA's `createXML()` writes its adapted template into CA's
@@ -106,7 +106,6 @@ Variables with a choice list (default like `true|false`) only accept one of the 
 | Option | Meaning |
 |---|---|
 | `--json` | Machine-readable output (see below). |
-| `--ignore-version` | Run `install` on an Unraid version that is not listed as tested (see [Limitations](../README.md#limitations)). |
 | `--limit N` | Number of `search` results (default 20). |
 
 ## Output and `--json`
@@ -195,7 +194,7 @@ and `config` (raw template fields).
 | 4 | ambiguous | `AMBIGUOUS` (app, with `candidates`), `AMBIGUOUS_FIELD` (field, with `fields`) |
 | 5 | required field without value | `MISSING_REQUIRED` (with `missing`) |
 | 6 | name in use | `NAME_CONFLICT` (with `conflicts`) |
-| 7 | environment / version | `CA_NOT_INSTALLED`, `FEED_MISSING`, `FEED_INVALID`, `UNTESTED_VERSION`, `DOCKERMAN_CHANGED`, `DOCKER_NOT_RUNNING` |
+| 7 | environment / version | `CA_NOT_INSTALLED`, `FEED_MISSING`, `FEED_INVALID`, `DOCKERMAN_CHANGED` (a dockerMan function the tool calls is missing), `DOCKER_NOT_RUNNING` |
 | 8 | install failed | `CREATEXML_FAILED`, `UNSUPPORTED`, `PULL_FAILED`, `WRITE_FAILED`, `RUN_FAILED`, `AUTOSTART_FAILED` |
 | 9 | confirmation required | `CONFIRMATION_REQUIRED` |
 | 10 | host port in use | `PORT_CONFLICT` (with `conflicts`, each with `suggested_port`) |

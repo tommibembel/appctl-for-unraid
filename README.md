@@ -41,7 +41,6 @@ like a click in the WebUI. Details: [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 - `--json` output with stable error codes and exit codes
 - Safe by default: nothing is installed without `--yes`; ambiguous apps, name conflicts, missing
   required values and host port conflicts stop before anything is changed
-- Refuses untested Unraid versions and detects changes in dockerMan's form handling
 
 ## Documentation
 
@@ -69,10 +68,9 @@ Requires Unraid 7.x with the Community Applications plugin. See [INSTALL.md](doc
 
 ## Limitations
 
-- Uses **internal, non-public** Unraid and CA functions. They can change with any Unraid or CA
-  update. Tested on **Unraid 7.1.2** with **Community Applications 2026.07.21**. `install` refuses
-  other Unraid versions unless `--ignore-version` is given, and stops if dockerMan's form handling
-  has new fields.
+- **Tested with Unraid 7.1.2 and Community Applications 2026.07.21.** It uses internal,
+  non-public Unraid and CA functions, which can change with any update. Other versions are not
+  checked or blocked – using them is up to you. Preview with `--dry-run` first.
 - The dockerMan form runs in the browser; that part is replicated in PHP and is the piece most
   likely to need an update after an Unraid release.
 - No Tailscale integration yet ([issue #1](https://github.com/tommibembel/unraid-ca-install/issues/1)).
