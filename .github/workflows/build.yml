@@ -1,0 +1,63 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['20*']          # plugin versions: YYYY.MM.DD[a-z]
+  pull_request:
+
+permissions:
+  contents: write          # create releases on tags
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils php-cli
+
+      - name: Documentation links
+        run: python3 tools/check-links.py
+
+      - name: PHP syntax check
+        run: for f in src/ca-install/*.php; do php -l "$f"; done
+
+      - name: Build plugin
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then ./build.sh "$GITHUB_REF_NAME"; else ./build.sh; fi
+
+      - name: Check embedded files survive the round trip
+        run: |
+          # Extract the embedded PHP files from the .plg like Unraid does and compare with the sources.
+          php -r '
+            $x = simplexml_load_file("dist/ca-install.plg", null, LIBXML_NOCDATA | LIBXML_NOENT);
+            $ok = true;
+            foreach ($x->FILE as $f) {
+              $name = (string)$f["Name"];
+              if (!str_ends_with($name, ".php")) continue;
+              $src = "src/ca-install/".basename($name);
+              $a = (string)$f->INLINE;
+              $b = file_get_contents($src);
+              $a = preg_replace("/^const CAI_VERSION = .*;$/m", "", $a);
+              $b = preg_replace("/^const CAI_VERSION = .*;$/m", "", $b);
+              if ($a !== $b) { echo "MISMATCH $name\n"; $ok = false; } else echo "ok $name\n";
+              file_put_contents("/tmp/".basename($name), (string)$f->INLINE);
+            }
+            exit($ok ? 0 : 1);'
+          php -l /tmp/ca-install.php && php -l /tmp/webui-action.php
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ca-install.plg
+          path: dist/ca-install.plg
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/ca-install.plg \
+            --title "ca-install $GITHUB_REF_NAME" \
+            --notes "$(awk -v v="###$GITHUB_REF_NAME" '$0==v{p=1;next} /^###/{p=0} p' plugin/CHANGES.md)"
