@@ -57,7 +57,8 @@ because Unraid re-installs all plugins in `/boot/config/plugins/` at boot.
 ## Update
 
 - WebUI: **Plugins** → *Check for Updates* → *Update*.
-- Command line: `plugin update appctl.plg`
+- Command line: `plugin check appctl.plg && plugin update appctl.plg` (`check` downloads the new
+  version; `update` alone reinstalls the last checked one)
 - From a newer local file: `plugin install /tmp/appctl.plg` again.
 
 ## Remove
