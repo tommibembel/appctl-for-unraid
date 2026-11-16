@@ -22,7 +22,7 @@ jobs:
         run: python3 tools/check-links.py
 
       - name: PHP syntax check
-        run: for f in src/ca-install/*.php; do php -l "$f"; done
+        run: for f in src/appctl/*.php; do php -l "$f"; done
 
       - name: Build plugin
         run: |
@@ -32,32 +32,32 @@ jobs:
         run: |
           # Extract the embedded PHP files from the .plg like Unraid does and compare with the sources.
           php -r '
-            $x = simplexml_load_file("dist/ca-install.plg", null, LIBXML_NOCDATA | LIBXML_NOENT);
+            $x = simplexml_load_file("dist/appctl.plg", null, LIBXML_NOCDATA | LIBXML_NOENT);
             $ok = true;
             foreach ($x->FILE as $f) {
               $name = (string)$f["Name"];
               if (!str_ends_with($name, ".php")) continue;
-              $src = "src/ca-install/".basename($name);
+              $src = "src/appctl/".basename($name);
               $a = (string)$f->INLINE;
               $b = file_get_contents($src);
-              $a = preg_replace("/^const CAI_VERSION = .*;$/m", "", $a);
-              $b = preg_replace("/^const CAI_VERSION = .*;$/m", "", $b);
+              $a = preg_replace("/^const APPCTL_VERSION = .*;$/m", "", $a);
+              $b = preg_replace("/^const APPCTL_VERSION = .*;$/m", "", $b);
               if ($a !== $b) { echo "MISMATCH $name\n"; $ok = false; } else echo "ok $name\n";
               file_put_contents("/tmp/".basename($name), (string)$f->INLINE);
             }
             exit($ok ? 0 : 1);'
-          php -l /tmp/ca-install.php && php -l /tmp/webui-action.php
+          php -l /tmp/appctl.php && php -l /tmp/webui-action.php
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ca-install.plg
-          path: dist/ca-install.plg
+          name: appctl.plg
+          path: dist/appctl.plg
 
       - name: Release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/ca-install.plg \
-            --title "ca-install $GITHUB_REF_NAME" \
+          gh release create "$GITHUB_REF_NAME" dist/appctl.plg \
+            --title "appctl $GITHUB_REF_NAME" \
             --notes "$(awk -v v="###$GITHUB_REF_NAME" '$0==v{p=1;next} /^###/{p=0} p' plugin/CHANGES.md)"

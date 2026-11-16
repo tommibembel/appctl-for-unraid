@@ -1,6 +1,6 @@
 <?php
 /*
- * ca-install – install Community Applications from the command line
+ * appctl – install Docker apps on Unraid from the command line
  * Copyright (C) 2026 tommibembel
  * SPDX-License-Identifier: GPL-2.0-only
  *

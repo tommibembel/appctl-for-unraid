@@ -6,7 +6,7 @@
 
 - Unraid **7.x** (tested: 7.1.2 – see [Limitations](../README.md#limitations))
 - **Community Applications** plugin installed, and the *Apps* tab opened at least once (that
-  downloads the app feed `ca-install` searches in)
+  downloads the app feed `appctl` searches in)
 - Docker service running
 - Shell access (SSH or the WebUI terminal) as root
 
@@ -17,21 +17,21 @@
 WebUI: **Plugins → Install Plugin**, paste
 
 ```
-https://github.com/tommibembel/unraid-ca-install/releases/latest/download/ca-install.plg
+https://github.com/tommibembel/appctl-for-unraid/releases/latest/download/appctl.plg
 ```
 
 and click *Install*. Or on the command line:
 
 ```
-plugin install https://github.com/tommibembel/unraid-ca-install/releases/latest/download/ca-install.plg
+plugin install https://github.com/tommibembel/appctl-for-unraid/releases/latest/download/appctl.plg
 ```
 
 ### From a local file
 
-Download or build `ca-install.plg` (see below), copy it to the server and run:
+Download or build `appctl.plg` (see below), copy it to the server and run:
 
 ```
-plugin install /tmp/ca-install.plg
+plugin install /tmp/appctl.plg
 ```
 
 This is the same mechanism the WebUI uses; Unraid copies the file to `/boot/config/plugins/`.
@@ -39,16 +39,16 @@ This is the same mechanism the WebUI uses; Unraid copies the file to `/boot/conf
 ### Check
 
 ```
-ca-install version
+appctl version
 ```
 
 ## What gets installed
 
 | Path | Content |
 |---|---|
-| `/boot/config/plugins/ca-install.plg` | the plugin file (on the flash drive; Unraid re-installs from it at every boot) |
-| `/usr/local/emhttp/plugins/ca-install/` | `ca-install.php`, `webui-action.php`, `ca-install` (wrapper) – in RAM |
-| `/usr/local/bin/ca-install` | symlink to the wrapper |
+| `/boot/config/plugins/appctl.plg` | the plugin file (on the flash drive; Unraid re-installs from it at every boot) |
+| `/usr/local/emhttp/plugins/appctl/` | `appctl.php`, `webui-action.php`, `appctl` (wrapper) – in RAM |
+| `/usr/local/bin/appctl` | symlink to the wrapper |
 
 Nothing else is changed. The plugin has no settings and no WebUI page; it survives reboots
 because Unraid re-installs all plugins in `/boot/config/plugins/` at boot.
@@ -56,32 +56,32 @@ because Unraid re-installs all plugins in `/boot/config/plugins/` at boot.
 ## Update
 
 - WebUI: **Plugins** → *Check for Updates* → *Update* (needs the public GitHub release).
-- Command line: `plugin update ca-install.plg`
-- From a newer local file: `plugin install /tmp/ca-install.plg` again.
+- Command line: `plugin update appctl.plg`
+- From a newer local file: `plugin install /tmp/appctl.plg` again.
 
 ## Remove
 
-WebUI: **Plugins** → *ca-install* → *Remove*, or:
+WebUI: **Plugins** → *appctl* → *Remove*, or:
 
 ```
-plugin remove ca-install.plg
+plugin remove appctl.plg
 ```
 
 This removes the program files and the command; Unraid moves the plugin file to
 `/boot/config/plugins-removed/`.
-Containers and templates installed with `ca-install` are **not** touched – they are normal
+Containers and templates installed with `appctl` are **not** touched – they are normal
 Unraid containers and stay manageable in the WebUI.
 
 ## Build from source
 
 ```
-git clone https://github.com/tommibembel/unraid-ca-install.git
-cd unraid-ca-install
+git clone https://github.com/tommibembel/appctl-for-unraid.git
+cd appctl-for-unraid
 ./build.sh                 # version = today, YYYY.MM.DD
 ./build.sh 2026.11.16b     # explicit version
 ```
 
-Result: `dist/ca-install.plg`. The program files from `src/ca-install/` are embedded in the
+Result: `dist/appctl.plg`. The program files from `src/appctl/` are embedded in the
 `.plg`; there is no separate package to download. `build.sh` needs only bash and sed
 (`xmllint`, if present, validates the result).
 
@@ -97,5 +97,5 @@ To publish a version:
 2. If tested on a new Unraid / CA version, update the tested versions in the README.
 3. Tag and push: `git tag 2026.11.16 && git push origin 2026.11.16`.
 
-The Action then creates a GitHub release with `ca-install.plg`. The plugin's `pluginURL` points
+The Action then creates a GitHub release with `appctl.plg`. The plugin's `pluginURL` points
 to the latest release, so the Unraid *Plugins* tab offers the update automatically.

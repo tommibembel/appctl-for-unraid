@@ -1,16 +1,19 @@
-# unraid-ca-install
+# appctl for Unraid
 
-Install apps from the Unraid **Community Applications** store from the command line – with the
-same result as clicking **Install → Apply** in the WebUI. Built for AI agents and scripts, usable
-by humans.
+`appctl` installs Docker apps from the **Community Applications** store on an Unraid server from
+the command line – with the same result as clicking **Install → Apply** in the WebUI. Built for AI
+agents and scripts, usable by humans.
+
+*Independent community project – not affiliated with or endorsed by Lime Technology or the
+Community Applications project.*
 
 **[Install](docs/INSTALL.md) · [Usage](docs/USAGE.md) · [For AI agents](AGENTS.md) · [Development](docs/DEVELOPMENT.md)**
 
 ```
-$ ca-install search example-app
-$ ca-install options 1234 --name example-app --set 80=8080
-$ ca-install install 1234 --name example-app --set 80=8080 --dry-run
-$ ca-install install 1234 --name example-app --set 80=8080 --yes
+$ appctl search example-app
+$ appctl options 1234 --name example-app --set 80=8080
+$ appctl install 1234 --name example-app --set 80=8080 --dry-run
+$ appctl install 1234 --name example-app --set 80=8080 --yes
 ```
 
 ## Why
@@ -20,7 +23,7 @@ start/stop/update containers but not create them from a CA template; remote-cont
 is fragile; hand-written templates and `docker run` commands miss the CA metadata, so icon,
 update check and *Installed Apps* don't work properly.
 
-`ca-install` instead runs the **original** CA and dockerMan code path:
+`appctl` instead runs the **original** CA and dockerMan code path:
 
 1. CA's `createXML()` adapts the template to the server (network, disks/pools, appdata path),
 2. the dockerMan *Add Container* form logic turns it into the form data the browser would send,
@@ -61,7 +64,7 @@ Suggested order for a new user: this README → [Install](docs/INSTALL.md) →
 On the Unraid server (WebUI → *Plugins → Install Plugin*, or the terminal):
 
 ```
-plugin install https://github.com/tommibembel/unraid-ca-install/releases/latest/download/ca-install.plg
+plugin install https://github.com/tommibembel/appctl-for-unraid/releases/latest/download/appctl.plg
 ```
 
 Requires Unraid 7.x with the Community Applications plugin. See [INSTALL.md](docs/INSTALL.md).
@@ -73,14 +76,14 @@ Requires Unraid 7.x with the Community Applications plugin. See [INSTALL.md](doc
   checked or blocked – using them is up to you. Preview with `--dry-run` first.
 - The dockerMan form runs in the browser; that part is replicated in PHP and is the piece most
   likely to need an update after an Unraid release.
-- No Tailscale integration yet ([issue #1](https://github.com/tommibembel/unraid-ca-install/issues/1)).
+- No Tailscale integration yet ([issue #1](https://github.com/tommibembel/appctl-for-unraid/issues/1)).
 - Docker containers only (no plugins from CA).
 - Run as root on the server (like the WebUI).
 
 ## Credits
 
-Community Applications by Andrew Zawadzki (Squid) and Lime Technology; dockerMan by Lime
-Technology, Bergware and contributors. `ca-install` only calls and mirrors their code.
+Unraid is a trademark of Lime Technology, Inc. Community Applications by Andrew Zawadzki (Squid) and Lime Technology; dockerMan by Lime
+Technology, Bergware and contributors. `appctl` only calls and mirrors their code.
 
 ## License
 

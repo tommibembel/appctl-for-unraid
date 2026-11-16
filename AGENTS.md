@@ -4,21 +4,21 @@
 
 Instructions for AI agents (Claude Code, Codex, Hermes, …). Two parts:
 
-- **[Part 1 – Using ca-install](#part-1--using-ca-install)**: installing Community Applications on
+- **[Part 1 – Using appctl](#part-1--using-appctl)**: installing Community Applications on
   an Unraid server with the tool.
 - **[Part 2 – Working on this repository](#part-2--working-on-this-repository)**: goals,
   principles and safety rules when changing or testing the code.
 
-# Part 1 – Using ca-install
+# Part 1 – Using appctl
 
 Full reference: [USAGE.md](docs/USAGE.md).
 
 ## Access
 
-`ca-install` runs on the Unraid server. Call it over SSH and always use `--json`:
+`appctl` runs on the Unraid server. Call it over SSH and always use `--json`:
 
 ```
-ssh <unraid-host> ca-install <command> ... --json
+ssh <unraid-host> appctl <command> ... --json
 ```
 
 Parse stdout as one JSON object. Check `ok`; on `false` act on `error.code` (table below).
@@ -48,19 +48,19 @@ Always read `warnings` and pass relevant ones on to the user.
 ## Workflow
 
 ```
-1. search      ca-install search <term> --json
+1. search      appctl search <term> --json
                -> pick the app with the user; remember its "id"
-2. options     ca-install options <id> --name <name> [--network …] --json
+2. options     appctl options <id> --name <name> [--network …] --json
                -> loop:
                   - data.problems empty and data.ready == true  -> step 3
                   - otherwise ask the user about each problem and about the
                     non-advanced fields they may want to change, then re-run
                     options with the answers (same arguments + new ones)
-3. preview     ca-install install <id> <same arguments> --dry-run --json
+3. preview     appctl install <id> <same arguments> --dry-run --json
                -> show the user: name, image (data.repository), network/IP,
                   ports, paths, variables (no secrets), autostart
 4. confirm     wait for the user's "yes"
-5. install     ca-install install <id> <same arguments> --yes --json
+5. install     appctl install <id> <same arguments> --yes --json
                -> report data.steps; on error report error.message and stop
 ```
 
@@ -102,7 +102,7 @@ What to ask in step 2 – keep it short:
   second time, so quote twice or pass the command via a heredoc:
   ```
   ssh <unraid-host> bash -s <<'EOF'
-  ca-install install 1234 --name example-app \
+  appctl install 1234 --name example-app \
     --container ExtraParams="--env-file /mnt/user/appdata/example-app/secrets.env" \
     --set 'APP_TITLE=My "special" server' --dry-run --json
   EOF
@@ -115,7 +115,7 @@ line references, how to verify a new Unraid version).
 
 ## Goal
 
-A small Unraid plugin with a CLI command `ca-install` that installs Community Applications
+A small Unraid plugin with a CLI command `appctl` that installs Community Applications
 **with exactly the same result as Install → Apply in the WebUI**: `my-<name>.xml` with the
 original CA metadata (TemplateURL, Icon, Support, …), icon, update check, *Edit*, entry under
 *Installed Apps*.

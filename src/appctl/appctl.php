@@ -1,6 +1,6 @@
 <?php
 /*
- * ca-install – install Community Applications from the command line
+ * appctl – install Docker apps on Unraid from the command line
  * Copyright (C) 2026 tommibembel
  * SPDX-License-Identifier: GPL-2.0-only
  *
@@ -19,13 +19,13 @@
  * must be re-checked when Unraid changes. Line numbers refer to Unraid 7.1.2.
  */
 
-const CAI_VERSION = '0.1.0-dev';
+const APPCTL_VERSION = '0.1.0-dev';
 
 
-const CAI_DOCROOT    = '/usr/local/emhttp';
-const CAI_FEED_CACHE = '/tmp/community.applications/tempFiles/templates_new.json';
-const CAI_CA_EXEC    = CAI_DOCROOT.'/plugins/community.applications/include/exec.php';
-const CAI_CA_PLG     = '/var/log/plugins/community.applications.plg';
+const APPCTL_DOCROOT    = '/usr/local/emhttp';
+const APPCTL_FEED_CACHE = '/tmp/community.applications/tempFiles/templates_new.json';
+const APPCTL_CA_EXEC    = APPCTL_DOCROOT.'/plugins/community.applications/include/exec.php';
+const APPCTL_CA_PLG     = '/var/log/plugins/community.applications.plg';
 
 // Exit codes (stable, for agents)
 const EXIT_OK            = 0;
@@ -44,7 +44,7 @@ ini_set('memory_limit', '512M');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
 ini_set('display_errors', 'stderr');
 
-class CaiError extends Exception {
+class AppctlError extends Exception {
   public string $codeName;
   public int $exitCode;
   public array $details;
@@ -56,8 +56,8 @@ class CaiError extends Exception {
   }
 }
 
-$CAI_WARNINGS = [];
-function warn(string $msg): void { global $CAI_WARNINGS; $CAI_WARNINGS[] = $msg; }
+$APPCTL_WARNINGS = [];
+function warn(string $msg): void { global $APPCTL_WARNINGS; $APPCTL_WARNINGS[] = $msg; }
 
 #################################################################
 # CLI parsing
@@ -65,16 +65,16 @@ function warn(string $msg): void { global $CAI_WARNINGS; $CAI_WARNINGS[] = $msg;
 
 function usage(): string {
   return <<<TXT
-ca-install {$GLOBALS['CAI_VERSION_STR']} – install Community Applications from the command line
+appctl {$GLOBALS['APPCTL_VERSION_STR']} – install Community Applications from the command line
 
 Usage:
-  ca-install search <term> [--limit N] [--json]
-  ca-install info <app> [--json]                   raw template from the CA feed
-  ca-install options <app> [options] [--json]      all settings adapted to this server, incl. problems
+  appctl search <term> [--limit N] [--json]
+  appctl info <app> [--json]                   raw template from the CA feed
+  appctl options <app> [options] [--json]      all settings adapted to this server, incl. problems
                                                    (missing values, port conflicts) -> ask the user, re-run
-  ca-install install <app> [options] --dry-run      show resulting template + docker command, change nothing
-  ca-install install <app> [options] --yes          really install
-  ca-install version [--json]
+  appctl install <app> [options] --dry-run      show resulting template + docker command, change nothing
+  appctl install <app> [options] --yes          really install
+  appctl version [--json]
 
 <app> is an exact app name, an app ID from `search`, or an exact repository (e.g. ghcr.io/example/app:latest).
 
@@ -103,7 +103,7 @@ except Tailscale):
 
 Order of field operations: --remove, then --add, then --set.
 
-Documentation: https://github.com/tommibembel/unraid-ca-install
+Documentation: https://github.com/tommibembel/appctl-for-unraid
   docs/USAGE.md (all options, JSON, error codes) – AGENTS.md (rules for AI agents)
 
 Exit codes: 0 ok, 2 usage, 3 not found, 4 ambiguous, 5 required field missing,
@@ -113,7 +113,7 @@ Exit codes: 0 ok, 2 usage, 3 not found, 4 ambiguous, 5 required field missing,
 
 TXT;
 }
-$GLOBALS['CAI_VERSION_STR'] = CAI_VERSION;
+$GLOBALS['APPCTL_VERSION_STR'] = APPCTL_VERSION;
 
 function parseArgs(array $argv): array {
   $o = ['cmd' => null, 'args' => [], 'json' => false, 'limit' => 20, 'name' => null, 'set' => [],
@@ -138,19 +138,19 @@ function parseArgs(array $argv): array {
       case '--help': case '-h': $o['cmd'] = 'help'; break;
       default:
         if (isset($kvOpts[$a])) {
-          if (!isset($argv[$i + 1])) throw new CaiError('USAGE', "$a needs KEY=VALUE", EXIT_USAGE);
+          if (!isset($argv[$i + 1])) throw new AppctlError('USAGE', "$a needs KEY=VALUE", EXIT_USAGE);
           $kv = $argv[++$i];
           $p = strpos($kv, '=');
-          if ($p === false || $p === 0) throw new CaiError('USAGE', "$a expects KEY=VALUE, got '$kv'", EXIT_USAGE);
+          if ($p === false || $p === 0) throw new AppctlError('USAGE', "$a expects KEY=VALUE, got '$kv'", EXIT_USAGE);
           $o[$kvOpts[$a]][] = [substr($kv, 0, $p), substr($kv, $p + 1)];
         } elseif (isset($listOpts[$a])) {
-          if (!isset($argv[$i + 1])) throw new CaiError('USAGE', "$a needs a value", EXIT_USAGE);
+          if (!isset($argv[$i + 1])) throw new AppctlError('USAGE', "$a needs a value", EXIT_USAGE);
           $o[$listOpts[$a]][] = $argv[++$i];
         } elseif (isset($valueOpts[$a])) {
-          if (!isset($argv[$i + 1])) throw new CaiError('USAGE', "$a needs a value", EXIT_USAGE);
+          if (!isset($argv[$i + 1])) throw new AppctlError('USAGE', "$a needs a value", EXIT_USAGE);
           $o[$valueOpts[$a]] = $argv[++$i];
         } elseif (str_starts_with($a, '--')) {
-          throw new CaiError('USAGE', "Unknown option $a", EXIT_USAGE);
+          throw new AppctlError('USAGE', "Unknown option $a", EXIT_USAGE);
         } elseif ($o['cmd'] === null) {
           $o['cmd'] = $a;
         } else {
@@ -165,7 +165,7 @@ function parseArgs(array $argv): array {
     if ($alias) { $o[$alias] = $val; unset($o['container'][$k]); }
   }
   if ($o['autostartWait'] !== null) {
-    if (!ctype_digit($o['autostartWait'])) throw new CaiError('USAGE', '--autostart-wait expects seconds', EXIT_USAGE);
+    if (!ctype_digit($o['autostartWait'])) throw new AppctlError('USAGE', '--autostart-wait expects seconds', EXIT_USAGE);
     $o['autostart'] = true;
   }
   return $o;
@@ -181,14 +181,14 @@ function unraidVersion(): string {
 }
 
 function caVersion(): string {
-  $plg = @file_get_contents(CAI_CA_PLG);
+  $plg = @file_get_contents(APPCTL_CA_PLG);
   if ($plg && preg_match('/<!ENTITY\s+version\s+"([^"]+)"/', $plg, $m)) return $m[1];
   return 'unknown';
 }
 
 function checkEnvironment(): void {
-  if (!is_file(CAI_CA_EXEC)) {
-    throw new CaiError('CA_NOT_INSTALLED', 'Community Applications plugin is not installed', EXIT_ENVIRONMENT);
+  if (!is_file(APPCTL_CA_EXEC)) {
+    throw new AppctlError('CA_NOT_INSTALLED', 'Community Applications plugin is not installed', EXIT_ENVIRONMENT);
   }
 }
 
@@ -198,16 +198,16 @@ function checkEnvironment(): void {
 
 /** Same reading logic as CA readJsonFile() (helpers.php ~line 130): serialized PHP, fallback JSON. */
 function loadFeed(): array {
-  if (!is_file(CAI_FEED_CACHE)) {
-    throw new CaiError('FEED_MISSING',
-      'CA app feed cache not found ('.CAI_FEED_CACHE.'). Open the "Apps" tab in the WebUI once to download it.',
+  if (!is_file(APPCTL_FEED_CACHE)) {
+    throw new AppctlError('FEED_MISSING',
+      'CA app feed cache not found ('.APPCTL_FEED_CACHE.'). Open the "Apps" tab in the WebUI once to download it.',
       EXIT_ENVIRONMENT);
   }
-  $raw = file_get_contents(CAI_FEED_CACHE);
+  $raw = file_get_contents(APPCTL_FEED_CACHE);
   $feed = @unserialize($raw, ['allowed_classes' => false]);
   if ($feed === false) $feed = json_decode($raw, true);
   if (!is_array($feed) || !$feed) {
-    throw new CaiError('FEED_INVALID', 'CA app feed cache could not be read', EXIT_ENVIRONMENT);
+    throw new AppctlError('FEED_INVALID', 'CA app feed cache could not be read', EXIT_ENVIRONMENT);
   }
   // Only Docker apps; skip plugins, language packs and blacklisted entries.
   return array_values(array_filter($feed, fn($t) =>
@@ -240,7 +240,7 @@ function shortText(string $s, int $max): string {
 }
 
 function cmdSearch(array $o): array {
-  if (!$o['args']) throw new CaiError('USAGE', 'search needs a search term', EXIT_USAGE);
+  if (!$o['args']) throw new AppctlError('USAGE', 'search needs a search term', EXIT_USAGE);
   $term = mb_strtolower(implode(' ', $o['args']));
   $hits = [];
   foreach (loadFeed() as $t) {
@@ -268,14 +268,14 @@ function resolveApp(array $feed, string $app): array {
   if (count($byName) === 1) return $byName[0];
   $cands = $byRepo ?: $byName;
   if (count($cands) > 1) {
-    throw new CaiError('AMBIGUOUS', "'$app' matches ".count($cands)." templates; use the ID or the exact repository",
+    throw new AppctlError('AMBIGUOUS', "'$app' matches ".count($cands)." templates; use the ID or the exact repository",
       EXIT_AMBIGUOUS, ['candidates' => array_map('summary', $cands)]);
   }
-  throw new CaiError('NOT_FOUND', "No app named '$app' found (try: ca-install search $app)", EXIT_NOT_FOUND);
+  throw new AppctlError('NOT_FOUND', "No app named '$app' found (try: appctl search $app)", EXIT_NOT_FOUND);
 }
 
 function cmdInfo(array $o): array {
-  if (count($o['args']) !== 1) throw new CaiError('USAGE', 'info needs exactly one app', EXIT_USAGE);
+  if (count($o['args']) !== 1) throw new AppctlError('USAGE', 'info needs exactly one app', EXIT_USAGE);
   $t = resolveApp(loadFeed(), $o['args'][0]);
   $configs = [];
   foreach (configList($t) as $c) {
@@ -313,7 +313,7 @@ function cmdInfo(array $o): array {
 /** Load dockerMan exactly like CreateDocker.php does (lines 14-25). */
 function loadDockerMan(): void {
   global $docroot, $var, $subnet, $custom, $driver, $dockercfg, $dockerManPaths, $DockerClient, $DockerUpdate, $DockerTemplates;
-  $docroot = CAI_DOCROOT;
+  $docroot = APPCTL_DOCROOT;
   $_SERVER['DOCUMENT_ROOT'] = $docroot;
   chdir($docroot);
   require_once "$docroot/plugins/dynamix.docker.manager/include/DockerClient.php";
@@ -326,11 +326,11 @@ function loadDockerMan(): void {
   $subnet = DockerUtil::network($custom);
   foreach (['postToXML', 'xmlToVar', 'xmlToCommand', 'pullImage', 'stopContainer', 'removeContainer', 'addRoute'] as $fn) {
     if (!function_exists($fn)) {
-      throw new CaiError('DOCKERMAN_CHANGED', "dockerMan function $fn() not found – this Unraid version is not compatible", EXIT_ENVIRONMENT);
+      throw new AppctlError('DOCKERMAN_CHANGED', "dockerMan function $fn() not found – this Unraid version is not compatible", EXIT_ENVIRONMENT);
     }
   }
   if (!is_file('/var/run/dockerd.pid')) {
-    throw new CaiError('DOCKER_NOT_RUNNING', 'Docker service is not running', EXIT_ENVIRONMENT);
+    throw new AppctlError('DOCKER_NOT_RUNNING', 'Docker service is not running', EXIT_ENVIRONMENT);
   }
 }
 
@@ -345,7 +345,7 @@ function webuiAction(string $script, array $post): string {
 function runCreateXML(array $t): string {
   $path = $t['Path'] ?? '';
   if (!$path || str_starts_with($path, '/boot/')) {
-    throw new CaiError('TEMPLATE_PATH', 'Template has no usable feed path', EXIT_INTERNAL);
+    throw new AppctlError('TEMPLATE_PATH', 'Template has no usable feed path', EXIT_INTERNAL);
   }
   // Same POST as Apps.page sends on "Install" (getPost() urldecodes the value).
   $out = webuiAction('plugins/community.applications/include/exec.php',
@@ -356,10 +356,10 @@ function runCreateXML(array $t): string {
     if (is_array($res)) break;
   }
   if (!is_array($res) || ($res['status'] ?? '') !== 'ok') {
-    throw new CaiError('CREATEXML_FAILED', 'CA createXML failed: '.($res['error'] ?? trim(substr($out, 0, 500))), EXIT_INSTALL_FAIL);
+    throw new AppctlError('CREATEXML_FAILED', 'CA createXML failed: '.($res['error'] ?? trim(substr($out, 0, 500))), EXIT_INSTALL_FAIL);
   }
   if (!is_file($path)) {
-    throw new CaiError('CREATEXML_FAILED', "CA createXML did not write $path", EXIT_INSTALL_FAIL);
+    throw new AppctlError('CREATEXML_FAILED', "CA createXML did not write $path", EXIT_INSTALL_FAIL);
   }
   return $path;
 }
@@ -411,7 +411,7 @@ function loadTemplateLikeDockerMan(string $xmlPath, string $finalName): array {
   $xml['Overview'] = str_replace(['[', ']'], ['<', '>'], $xml['Overview']);
   $xml['Description'] = $xml['Overview'] = strip_tags(str_replace("<br>", "\n", $xml['Overview']));
   if (($xml['TailscaleEnabled'] ?? '') === 'true') {
-    throw new CaiError('UNSUPPORTED', 'Templates with Tailscale enabled are not supported yet', EXIT_INSTALL_FAIL);
+    throw new AppctlError('UNSUPPORTED', 'Templates with Tailscale enabled are not supported yet', EXIT_INSTALL_FAIL);
   }
   return $xml;
 }
@@ -444,7 +444,7 @@ function setKeyFor(array $configs, int $i): ?string {
 }
 
 /** Container fields settable with --container (form fields cont<KEY>). Name/Network/MyIP via --name/--network/--ip. */
-const CAI_CONTAINER_FIELDS = ['Repository', 'Registry', 'Shell', 'Privileged', 'WebUI', 'Icon', 'ExtraParams', 'PostArgs',
+const APPCTL_CONTAINER_FIELDS = ['Repository', 'Registry', 'Shell', 'Privileged', 'WebUI', 'Icon', 'ExtraParams', 'PostArgs',
   'CPUset', 'Category', 'Overview', 'Requires', 'Support', 'Project', 'TemplateURL', 'DonateText', 'DonateLink'];
 
 /** Field properties editable with --set KEY.PROP=VALUE (WebUI "Edit" dialog), with allowed values. */
@@ -465,11 +465,11 @@ function fieldList(array $configs): array {
 function oneField(array $configs, string $key, string $opt): int {
   $idx = findField($configs, $key);
   if (count($idx) > 1) {
-    throw new CaiError('AMBIGUOUS_FIELD', "$opt $key matches several template fields", EXIT_AMBIGUOUS,
+    throw new AppctlError('AMBIGUOUS_FIELD', "$opt $key matches several template fields", EXIT_AMBIGUOUS,
       ['fields' => fieldList(array_intersect_key($configs, array_flip($idx)))]);
   }
   if (!$idx) {
-    throw new CaiError('UNKNOWN_FIELD', "$opt $key: no template field with this Target or Name", EXIT_USAGE, ['fields' => fieldList($configs)]);
+    throw new AppctlError('UNKNOWN_FIELD', "$opt $key: no template field with this Target or Name", EXIT_USAGE, ['fields' => fieldList($configs)]);
   }
   return $idx[0];
 }
@@ -486,34 +486,34 @@ function applyUserInput(array &$xml, array $o): void {
       // <select id="netCONT"> lists the existing containers except this one (CreateDocker.php lines 1114-1122)
       $exists = false;
       foreach ($DockerClient->getDockerContainers() as $ct) if ($ct['Name'] === $m[1] && $ct['Name'] !== $xml['Name']) $exists = true;
-      if (!$exists) throw new CaiError('INVALID_NETWORK', "container:{$m[1]} – no such (other) container", EXIT_USAGE);
+      if (!$exists) throw new AppctlError('INVALID_NETWORK', "container:{$m[1]} – no such (other) container", EXIT_USAGE);
     } elseif (!array_key_exists($o['network'], $subnet)) {
-      throw new CaiError('INVALID_NETWORK', "Unknown network '{$o['network']}'", EXIT_USAGE,
+      throw new AppctlError('INVALID_NETWORK', "Unknown network '{$o['network']}'", EXIT_USAGE,
         ['available' => array_merge(array_keys($subnet), ['container:<name>'])]);
     }
     $xml['Network'] = $o['network'];
   }
   if ($o['ip'] !== null) {
     if (in_array($xml['Network'], ['bridge', 'host', 'none'], true) || str_starts_with($xml['Network'], 'container:')) {
-      throw new CaiError('USAGE', "--ip only works with a custom network (current: {$xml['Network']})", EXIT_USAGE);
+      throw new AppctlError('USAGE', "--ip only works with a custom network (current: {$xml['Network']})", EXIT_USAGE);
     }
     $xml['MyIP'] = $o['ip'];
   }
   // Container fields
   foreach ($o['container'] as [$key, $value]) {
     $field = null;
-    foreach (CAI_CONTAINER_FIELDS as $f) if (strcasecmp($f, $key) === 0) $field = $f;
+    foreach (APPCTL_CONTAINER_FIELDS as $f) if (strcasecmp($f, $key) === 0) $field = $f;
     if ($field === null) {
-      throw new CaiError('UNKNOWN_FIELD', "--container $key: unknown container field", EXIT_USAGE,
-        ['available' => array_merge(CAI_CONTAINER_FIELDS, ['Name', 'Network', 'MyIP'])]);
+      throw new AppctlError('UNKNOWN_FIELD', "--container $key: unknown container field", EXIT_USAGE,
+        ['available' => array_merge(APPCTL_CONTAINER_FIELDS, ['Name', 'Network', 'MyIP'])]);
     }
-    if ($field === 'Shell' && !in_array($value, ['sh', 'bash'], true)) throw new CaiError('INVALID_VALUE', '--container Shell: sh or bash', EXIT_USAGE);
+    if ($field === 'Shell' && !in_array($value, ['sh', 'bash'], true)) throw new AppctlError('INVALID_VALUE', '--container Shell: sh or bash', EXIT_USAGE);
     if ($field === 'Privileged') {
-      if (!in_array(strtolower($value), ['true', 'false'], true)) throw new CaiError('INVALID_VALUE', '--container Privileged: true or false', EXIT_USAGE);
+      if (!in_array(strtolower($value), ['true', 'false'], true)) throw new AppctlError('INVALID_VALUE', '--container Privileged: true or false', EXIT_USAGE);
       $value = strtolower($value);
     }
     if ($field === 'CPUset' && $value !== '' && !preg_match('/^\d+(,\d+)*$/', $value)) {
-      throw new CaiError('INVALID_VALUE', '--container CPUset: comma separated CPU numbers, e.g. 2,3', EXIT_USAGE);
+      throw new AppctlError('INVALID_VALUE', '--container CPUset: comma separated CPU numbers, e.g. 2,3', EXIT_USAGE);
     }
     $xml[$field] = $value;
   }
@@ -525,14 +525,14 @@ function applyUserInput(array &$xml, array $o): void {
   // --add TYPE:TARGET=VALUE   (addConfigPopup(), CreateDocker.php lines 590-640)
   foreach ($o['add'] as $spec) {
     if (!preg_match('/^(Path|Port|Variable|Label|Device):(.*)$/is', $spec, $m)) {
-      throw new CaiError('USAGE', "--add expects TYPE:TARGET=VALUE with TYPE Path|Port|Variable|Label|Device, got '$spec'", EXIT_USAGE);
+      throw new AppctlError('USAGE', "--add expects TYPE:TARGET=VALUE with TYPE Path|Port|Variable|Label|Device, got '$spec'", EXIT_USAGE);
     }
     $type = ucfirst(strtolower($m[1]));
     if ($type === 'Device') {
       $target = $value = $m[2];
     } else {
       $p = strpos($m[2], '=');
-      if ($p === false || $p === 0) throw new CaiError('USAGE', "--add $type expects $type:TARGET=VALUE", EXIT_USAGE);
+      if ($p === false || $p === 0) throw new AppctlError('USAGE', "--add $type expects $type:TARGET=VALUE", EXIT_USAGE);
       [$target, $value] = [substr($m[2], 0, $p), substr($m[2], $p + 1)];
     }
     // makeName(): "Host Path 1", "Host Port 2", "Host Key 3" (Variable), "Host Label 1", "Host Device 1"
@@ -554,7 +554,7 @@ function applyUserInput(array &$xml, array $o): void {
     if ($prop === null) {
       if (($c['Type'] ?? '') === 'Variable' && count(explode('|', $c['Default'] ?? '')) > 1
           && !in_array($value, explode('|', $c['Default']), true)) {
-        throw new CaiError('INVALID_VALUE', "--set $key: allowed values are ".str_replace('|', ', ', $c['Default']), EXIT_USAGE);
+        throw new AppctlError('INVALID_VALUE', "--set $key: allowed values are ".str_replace('|', ', ', $c['Default']), EXIT_USAGE);
       }
       $c['Value'] = $value;
       if (($c['Type'] ?? '') === 'Device') $c['Target'] = $value;
@@ -565,7 +565,7 @@ function applyUserInput(array &$xml, array $o): void {
     } else {
       $rules = fieldPropRules($c['Type'] ?? '');
       if ($rules[$prop] !== null && !in_array($value, $rules[$prop], true)) {
-        throw new CaiError('INVALID_VALUE', "--set $key.$prop: allowed values are ".implode(', ', $rules[$prop]), EXIT_USAGE);
+        throw new AppctlError('INVALID_VALUE', "--set $key.$prop: allowed values are ".implode(', ', $rules[$prop]), EXIT_USAGE);
       }
       // The "Edit" dialog re-reads all inputs: attributes the template did not have become ''.
       foreach (['Name', 'Target', 'Default', 'Mode', 'Description', 'Type', 'Display', 'Required', 'Mask'] as $attr) $c[$attr] ??= '';
@@ -790,7 +790,7 @@ function nameConflicts(string $name): array {
  * and collects problems instead of failing on them. Usage errors (bad --set/--network) still throw.
  */
 function prepare(array $o): array {
-  if (count($o['args']) !== 1) throw new CaiError('USAGE', "{$o['cmd']} needs exactly one app", EXIT_USAGE);
+  if (count($o['args']) !== 1) throw new AppctlError('USAGE', "{$o['cmd']} needs exactly one app", EXIT_USAGE);
   checkEnvironment();
   $t = resolveApp(loadFeed(), $o['args'][0]);
   if (!empty($t['Deprecated'])) warn("App '{$t['Name']}' is marked as deprecated in CA");
@@ -800,7 +800,7 @@ function prepare(array $o): array {
   $name = $o['name'] ?? str_replace(' ', '-', $t['Name']);   // createXML: str_replace(" ","-",Name)
   $name = preg_replace('/\s+/', '', $name);
   if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.\-]+$/', $name)) {   // pattern of input[name=contName]
-    throw new CaiError('INVALID_NAME', "Invalid container name '$name' (allowed: letters, digits, _ . -)", EXIT_USAGE);
+    throw new AppctlError('INVALID_NAME', "Invalid container name '$name' (allowed: letters, digits, _ . -)", EXIT_USAGE);
   }
   $xmlPath = runCreateXML($t);                                // 1. ORIGINAL CA createXML()
   $xml = loadTemplateLikeDockerMan($xmlPath, $name);          // 2. dockerMan form load
@@ -871,11 +871,11 @@ function cmdOptions(array $o): array {
       'autostart_wait' => $o['autostartWait'],
     ],
     // every other container field, settable with --container KEY=VALUE
-    'container_fields' => array_combine(CAI_CONTAINER_FIELDS, array_map(fn($f) => match ($f) {
+    'container_fields' => array_combine(APPCTL_CONTAINER_FIELDS, array_map(fn($f) => match ($f) {
       'Privileged' => ($post['contPrivileged'] ?? '') === 'on' ? 'true' : 'false',
       'Shell'      => $post['contShell'] ?? '',
       default      => $post["cont$f"] ?? '',
-    }, CAI_CONTAINER_FIELDS)),
+    }, APPCTL_CONTAINER_FIELDS)),
     'networks'   => $networks,
     'fields'     => $fields,
     'requires'   => trim(strip_tags(str_replace(['[', ']'], ['<', '>'], $ctx['xml']['Requires'] ?? ''))),
@@ -887,24 +887,24 @@ function cmdOptions(array $o): array {
 }
 
 function cmdInstall(array $o): array {
-  if ($o['dry'] && $o['yes']) throw new CaiError('USAGE', 'Use either --dry-run or --yes', EXIT_USAGE);
+  if ($o['dry'] && $o['yes']) throw new AppctlError('USAGE', 'Use either --dry-run or --yes', EXIT_USAGE);
   if (!$o['dry'] && !$o['yes']) {
-    throw new CaiError('CONFIRMATION_REQUIRED', 'Nothing done. Preview with --dry-run, then install with --yes.', EXIT_CONFIRM);
+    throw new AppctlError('CONFIRMATION_REQUIRED', 'Nothing done. Preview with --dry-run, then install with --yes.', EXIT_CONFIRM);
   }
   $ctx = prepare($o);
   $name = $ctx['name'];
   if ($ctx['name_conflicts'] && !$o['replace']) {
-    throw new CaiError('NAME_CONFLICT', "Name '$name' already in use: ".implode(', ', $ctx['name_conflicts']).'. Use --name or --replace.',
+    throw new AppctlError('NAME_CONFLICT', "Name '$name' already in use: ".implode(', ', $ctx['name_conflicts']).'. Use --name or --replace.',
       EXIT_CONFLICT, ['conflicts' => $ctx['name_conflicts']]);
   }
   if ($ctx['missing']) {
-    throw new CaiError('MISSING_REQUIRED', 'Required fields without value: '.
+    throw new AppctlError('MISSING_REQUIRED', 'Required fields without value: '.
       implode(', ', array_map(fn($m) => "{$m['name']} ({$m['target']})", $ctx['missing'])).'. Set them with --set KEY=VALUE.',
       EXIT_MISSING_REQ, ['missing' => $ctx['missing']]);
   }
   if ($ctx['port_conflicts']) {
     $c = array_values($ctx['port_conflicts']);
-    throw new CaiError('PORT_CONFLICT', 'Host ports already in use: '.implode(', ', array_map(fn($c) =>
+    throw new AppctlError('PORT_CONFLICT', 'Host ports already in use: '.implode(', ', array_map(fn($c) =>
       "{$c['protocol']}/{$c['port']} ({$c['field']}, used by {$c['used_by']}, free: {$c['suggested_port']})", $c)).
       '. Choose free ports with --set <target>=<port> or use a custom network like br0.',
       EXIT_PORT_CONFLICT, ['conflicts' => $c]);
@@ -941,7 +941,7 @@ function setAutostart(string $name, ?string $wait): string {
   }
   $names = array_map(fn($l) => explode(' ', $l)[0], (array)@file($file, FILE_IGNORE_NEW_LINES));
   if (!in_array($name, $names, true)) {
-    throw new CaiError('AUTOSTART_FAILED', "Container installed and running, but enabling autostart failed – enable it on the Docker page", EXIT_INSTALL_FAIL);
+    throw new AppctlError('AUTOSTART_FAILED', "Container installed and running, but enabling autostart failed – enable it on the Docker page", EXIT_INSTALL_FAIL);
   }
   return 'autostart enabled'.($wait !== null ? " (wait {$wait}s)" : '');
 }
@@ -955,7 +955,7 @@ function doInstall(string $postXML, string $Name, string $Repository, string $fi
   $steps = [];
   if (!$DockerClient->doesImageExist($Repository)) {
     if (!pullImage($Name, $Repository, false)) {
-      throw new CaiError('PULL_FAILED', "Pulling image $Repository failed", EXIT_INSTALL_FAIL);
+      throw new AppctlError('PULL_FAILED', "Pulling image $Repository failed", EXIT_INSTALL_FAIL);
     }
     $steps[] = "pulled $Repository";
   }
@@ -973,11 +973,11 @@ function doInstall(string $postXML, string $Name, string $Repository, string $fi
     }
   }
   if (file_put_contents($filename, $postXML) === false) {
-    throw new CaiError('WRITE_FAILED', "Could not write $filename", EXIT_INSTALL_FAIL);
+    throw new AppctlError('WRITE_FAILED', "Could not write $filename", EXIT_INSTALL_FAIL);
   }
   $steps[] = "wrote $filename";
   if ($DockerClient->doesContainerExist($Name)) {
-    if (!$replace) throw new CaiError('NAME_CONFLICT', "Container '$Name' appeared during install", EXIT_CONFLICT);
+    if (!$replace) throw new AppctlError('NAME_CONFLICT', "Container '$Name' appeared during install", EXIT_CONFLICT);
     $old = $DockerClient->getContainerDetails($Name);
     if (!empty($old['State']['Running'])) { stopContainer($Name, false, false); $steps[] = "stopped old $Name"; }
     removeContainer($Name, false, false);
@@ -994,7 +994,7 @@ function doInstall(string $postXML, string $Name, string $Repository, string $fi
   while (($line = fgets($proc)) !== false) $output .= $line;
   $rc = pclose($proc);
   if ($rc !== 0) {
-    throw new CaiError('RUN_FAILED', "docker run failed (exit $rc): ".trim($output), EXIT_INSTALL_FAIL,
+    throw new AppctlError('RUN_FAILED', "docker run failed (exit $rc): ".trim($output), EXIT_INSTALL_FAIL,
       ['output' => trim($output), 'template_file' => $filename,
        'hint' => 'The template was saved (same as WebUI). Fix the cause and re-run with --replace, or edit it in the WebUI.']);
   }
@@ -1064,7 +1064,7 @@ function printHuman(string $cmd, array $d): void {
       if (!$d['dry_run']) echo "\n".implode("\n", $d['steps'])."\nContainer ID: {$d['container_id']}\n";
       break;
     case 'version':
-      printf("ca-install %s
+      printf("appctl %s
 Unraid %s
 Community Applications %s
 ", $d['ca_install'], $d['unraid'], $d['community_applications']);
@@ -1073,7 +1073,7 @@ Community Applications %s
 }
 
 function main(array $argv): int {
-  global $CAI_WARNINGS;
+  global $APPCTL_WARNINGS;
   $json = in_array('--json', $argv, true);
   try {
     $o = parseArgs($argv);
@@ -1084,18 +1084,18 @@ function main(array $argv): int {
       case 'info':    checkEnvironment(); $data = cmdInfo($o); break;
       case 'options': $data = cmdOptions($o); break;
       case 'install': $data = cmdInstall($o); break;
-      case 'version': $data = ['ca_install' => CAI_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()]; break;
-      default: throw new CaiError('USAGE', "Unknown command '$cmd' (see ca-install --help)", EXIT_USAGE);
+      case 'version': $data = ['ca_install' => APPCTL_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()]; break;
+      default: throw new AppctlError('USAGE', "Unknown command '$cmd' (see appctl --help)", EXIT_USAGE);
     }
     if ($json) {
-      echo json_encode(['ok' => true, 'command' => $cmd, 'data' => $data, 'warnings' => $CAI_WARNINGS],
+      echo json_encode(['ok' => true, 'command' => $cmd, 'data' => $data, 'warnings' => $APPCTL_WARNINGS],
         JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), "\n";
     } else {
       printHuman($cmd, $data);
-      foreach ($CAI_WARNINGS as $w) fwrite(STDERR, "warning: $w\n");
+      foreach ($APPCTL_WARNINGS as $w) fwrite(STDERR, "warning: $w\n");
     }
     return EXIT_OK;
-  } catch (CaiError $e) {
+  } catch (AppctlError $e) {
     $err = ['code' => $e->codeName, 'message' => $e->getMessage()] + $e->details;
     $exit = $e->exitCode;
   } catch (Throwable $e) {
@@ -1103,7 +1103,7 @@ function main(array $argv): int {
     $exit = EXIT_INTERNAL;
   }
   if ($json) {
-    echo json_encode(['ok' => false, 'error' => $err, 'warnings' => $CAI_WARNINGS],
+    echo json_encode(['ok' => false, 'error' => $err, 'warnings' => $APPCTL_WARNINGS],
       JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), "\n";
   } else {
     fwrite(STDERR, "error [{$err['code']}]: {$err['message']}\n");
@@ -1111,9 +1111,9 @@ function main(array $argv): int {
     foreach ($err['conflicts'] ?? [] as $c) if (is_array($c)) fwrite(STDERR, "  port {$c['protocol']}/{$c['port']} ({$c['field']} -> container {$c['target']}): used by {$c['used_by']}\n");
     foreach ($err['missing'] ?? [] as $m) fwrite(STDERR, "  missing: {$m['name']} ({$m['type']} {$m['target']})\n");
     foreach ($err['available'] ?? [] as $n) fwrite(STDERR, "  available: $n\n");
-    foreach ($CAI_WARNINGS as $w) fwrite(STDERR, "warning: $w\n");
+    foreach ($APPCTL_WARNINGS as $w) fwrite(STDERR, "warning: $w\n");
   }
   return $exit;
 }
 
-if (!defined('CAI_NO_MAIN')) exit(main($argv));   // CAI_NO_MAIN: include for tests
+if (!defined('APPCTL_NO_MAIN')) exit(main($argv));   // APPCTL_NO_MAIN: include for tests

@@ -2,7 +2,7 @@
 
 [README](../README.md) · [Install](INSTALL.md) · **Usage** · [Agents](../AGENTS.md) · [Development](DEVELOPMENT.md)
 
-`ca-install` installs Docker apps from the Unraid **Community Applications** (CA) store from the
+`appctl` installs Docker apps from the Unraid **Community Applications** (CA) store from the
 command line. The result is the same as clicking **Install → Apply** in the WebUI: a
 `my-<name>.xml` user template with the original CA metadata, icon, update check, *Edit* support
 and an entry under *Apps → Installed Apps*.
@@ -21,13 +21,13 @@ For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installati
 
 | Command | What it does | Changes the server? |
 |---|---|---|
-| `ca-install search <term> [--limit N]` | Search the CA feed (name, author, repository, description). Plugins, language packs and blacklisted apps are excluded. | no |
-| `ca-install info <app>` | Raw template from the CA feed (fields with defaults, as published). | no |
-| `ca-install options <app> [options]` | The *Add Container* form as data: every setting **already adapted to this server** (appdata path, network, …) plus problems (missing values, port conflicts, name conflicts) and `ready: true/false`. | no ¹ |
-| `ca-install install <app> [options] --dry-run` | Shows the resulting `my-*.xml` and the `docker run` command. | no ¹ |
-| `ca-install install <app> [options] --yes` | Really installs: pull image, write template, start container, optional autostart. | **yes** |
-| `ca-install version` | Tool, Unraid and CA versions. | no |
-| `ca-install --help` | Short help. | no |
+| `appctl search <term> [--limit N]` | Search the CA feed (name, author, repository, description). Plugins, language packs and blacklisted apps are excluded. | no |
+| `appctl info <app>` | Raw template from the CA feed (fields with defaults, as published). | no |
+| `appctl options <app> [options]` | The *Add Container* form as data: every setting **already adapted to this server** (appdata path, network, …) plus problems (missing values, port conflicts, name conflicts) and `ready: true/false`. | no ¹ |
+| `appctl install <app> [options] --dry-run` | Shows the resulting `my-*.xml` and the `docker run` command. | no ¹ |
+| `appctl install <app> [options] --yes` | Really installs: pull image, write template, start container, optional autostart. | **yes** |
+| `appctl version` | Tool, Unraid and CA versions. | no |
+| `appctl --help` | Short help. | no |
 
 ¹ Like the WebUI's *Install* button, CA's `createXML()` writes its adapted template into CA's
 cache in RAM (`/tmp/community.applications/tempFiles/…`). Nothing else is written.
@@ -47,13 +47,13 @@ lists the candidates with their IDs.
 ## Typical workflow
 
 ```
-ca-install search example-app                      # find the app, note the ID
-ca-install options 1234 --name example-app         # look at all settings and problems
-ca-install options 1234 --name example-app \
+appctl search example-app                      # find the app, note the ID
+appctl options 1234 --name example-app         # look at all settings and problems
+appctl options 1234 --name example-app \
     --set 80=8080                                  # fix problems, repeat until "READY"
-ca-install install 1234 --name example-app \
+appctl install 1234 --name example-app \
     --set 80=8080 --dry-run                        # final preview
-ca-install install 1234 --name example-app \
+appctl install 1234 --name example-app \
     --set 80=8080 --yes                            # install
 ```
 
@@ -63,7 +63,7 @@ same code, so whatever `options` reports as ready also installs.
 ## Options for `options` and `install`
 
 These cover everything the WebUI *Add Container* form can do, except the Tailscale section
-(see [issue #1](https://github.com/tommibembel/unraid-ca-install/issues/1)).
+(see [issue #1](https://github.com/tommibembel/appctl-for-unraid/issues/1)).
 
 ### Container
 
@@ -120,7 +120,7 @@ With `--json` every command prints exactly one JSON object on stdout:
 
 ### `options` data
 
-Example output (illustrative, shortened) for `ca-install options 1234 --name example-app --json`.
+Example output (illustrative, shortened) for `appctl options 1234 --name example-app --json`.
 Host port 80 is taken by the Unraid WebUI, so the template's default port conflicts:
 
 ```json
@@ -206,7 +206,7 @@ Error details: `UNKNOWN_FIELD` lists all `fields` (or `available` container fiel
 
 **Same as the WebUI (on purpose):**
 - *Empty value → default.* dockerMan uses a field's default when its value is empty. You cannot
-  "empty" a field that has a default; use `--remove KEY` instead. `ca-install` warns about this.
+  "empty" a field that has a default; use `--remove KEY` instead. `appctl` warns about this.
 - Template quirks are reproduced byte for byte, e.g. `Mode="{3}"` on variables without a mode
   and CRLF line breaks in the description – so the result is identical to a WebUI install.
 - On `bridge`/`host` networks port fields are published host ports; on custom networks like
@@ -217,12 +217,12 @@ Error details: `UNKNOWN_FIELD` lists all `fields` (or `available` container fiel
 **Different from the WebUI (on purpose):**
 - *Appdata path follows the container name.* In the WebUI the `/config` appdata path keeps the
   template name even if you rename the container – a second instance would share data with the
-  first one. `ca-install` uses the final name (`/mnt/user/appdata/<name>`).
+  first one. `appctl` uses the final name (`/mnt/user/appdata/<name>`).
 - *Port conflict check.* A human sees conflicts in the form, an agent doesn't. Before installing,
   host ports on `bridge`/`host` networks are checked against listening sockets and the port
   bindings of all existing containers (also stopped ones, as warning). Conflicts stop the install
   and come with a free port suggestion (port + 8000, e.g. 80 → 8080).
-- *Name conflicts stop the install.* CA would silently append `-1`; `ca-install` refuses unless
+- *Name conflicts stop the install.* CA would silently append `-1`; `appctl` refuses unless
   `--replace` or a different `--name` is given.
 - *Image first.* The image is pulled before the template is written, so a failed pull leaves
   nothing behind.
@@ -230,7 +230,7 @@ Error details: `UNKNOWN_FIELD` lists all `fields` (or `available` container fiel
   container (e.g. after a container was renamed outside dockerMan), it is cleared, so update
   status and links are correct.
 
-**Not supported yet:** the Tailscale section of the form ([issue #1](https://github.com/tommibembel/unraid-ca-install/issues/1)).
+**Not supported yet:** the Tailscale section of the form ([issue #1](https://github.com/tommibembel/appctl-for-unraid/issues/1)).
 Templates that enable Tailscale are refused with `UNSUPPORTED`.
 
 **What a real install writes:**
@@ -242,14 +242,14 @@ Templates that enable Tailscale are refused with `UNSUPPORTED`.
 
 Search and inspect:
 ```
-ca-install search example --limit 5
-ca-install info 1234
+appctl search example --limit 5
+appctl info 1234
 ```
 
 Install on a custom network with a fixed IP, drop a placeholder field, load secrets from an env
 file instead of the template, enable autostart:
 ```
-ca-install install 1234 --name example-app --network br0 --ip 192.168.1.20 \
+appctl install 1234 --name example-app --network br0 --ip 192.168.1.20 \
     --remove EXAMPLE_API_TOKEN \
     --container ExtraParams="--env-file /mnt/user/appdata/example-app/secrets.env" \
     --autostart --dry-run
@@ -257,17 +257,17 @@ ca-install install 1234 --name example-app --network br0 --ip 192.168.1.20 \
 
 Replace a hand-made container/template with the proper CA template (same name):
 ```
-ca-install install 1234 --name example-app --replace ... --yes
+appctl install 1234 --name example-app --replace ... --yes
 ```
 
 Add a read-only path and a label, change a field's display:
 ```
-ca-install install <app> --add Path:/media=/mnt/user/media --set /media.mode=ro \
+appctl install <app> --add Path:/media=/mnt/user/media --set /media.mode=ro \
     --add Label:com.example.backup=true --set 8080.display=advanced --dry-run
 ```
 
 Agent-style JSON:
 ```
-ca-install options 1234 --name example-app --json | jq '.data.problems'
-ca-install install 1234 --name example-app --set 80=8080 --yes --json | jq '.data.steps'
+appctl options 1234 --name example-app --json | jq '.data.problems'
+appctl install 1234 --name example-app --set 80=8080 --yes --json | jq '.data.steps'
 ```

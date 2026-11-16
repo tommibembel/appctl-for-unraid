@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ca-install – install Community Applications from the command line
+# appctl – install Docker apps on Unraid from the command line
 # Copyright (C) 2026 tommibembel
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# Builds dist/ca-install.plg with all program files embedded (no separate package).
+# Builds dist/appctl.plg with all program files embedded (no separate package).
 # Usage: ./build.sh [VERSION]   (default: today, YYYY.MM.DD)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -12,9 +12,9 @@ VERSION="${1:-$(date +%Y.%m.%d)}"
 VERSION="${VERSION#v}"
 [[ "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}[a-z]?$ ]] || { echo "invalid version '$VERSION' (YYYY.MM.DD[a-z])" >&2; exit 1; }
 
-NAME=ca-install
-GITHUB=tommibembel/unraid-ca-install
-SRC=src/ca-install
+NAME=appctl
+GITHUB=tommibembel/appctl-for-unraid
+SRC=src/appctl
 OUT=dist/$NAME.plg
 mkdir -p dist
 
@@ -58,12 +58,12 @@ mkdir -p &plugdir;
 </FILE>
 
 EOF
-embed "&plugdir;/ca-install.php"   0644 "$SRC/ca-install.php" "s/^const CAI_VERSION = '.*';/const CAI_VERSION = '$VERSION';/"
+embed "&plugdir;/appctl.php"   0644 "$SRC/appctl.php" "s/^const APPCTL_VERSION = '.*';/const APPCTL_VERSION = '$VERSION';/"
 embed "&plugdir;/webui-action.php" 0644 "$SRC/webui-action.php"
 cat <<'EOF'
-<FILE Name="&plugdir;/ca-install" Mode="0755">
+<FILE Name="&plugdir;/appctl" Mode="0755">
 <INLINE><![CDATA[#!/bin/bash
-exec /usr/bin/php /usr/local/emhttp/plugins/ca-install/ca-install.php "$@"
+exec /usr/bin/php /usr/local/emhttp/plugins/appctl/appctl.php "$@"
 ]]></INLINE>
 </FILE>
 
@@ -74,7 +74,7 @@ ln -sf &plugdir;/&name; /usr/local/bin/&name;
 echo ""
 echo "----------------------------------------------------"
 echo " &name; &version; installed"
-echo " Usage: ca-install --help"
+echo " Usage: appctl --help"
 echo "----------------------------------------------------"
 echo ""
 </INLINE>

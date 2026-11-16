@@ -2,12 +2,12 @@
 
 [README](../README.md) · [Install](INSTALL.md) · [Usage](USAGE.md) · [Agents](../AGENTS.md) · **Development**
 
-How `ca-install` works internally, what is original Unraid code and what is replicated, and how
+How `appctl` works internally, what is original Unraid code and what is replicated, and how
 to verify it on a new Unraid version. Read this before changing the install pipeline.
 
 ## Principle
 
-The result must be indistinguishable from a WebUI install. So `ca-install` does **not** write
+The result must be indistinguishable from a WebUI install. So `appctl` does **not** write
 its own templates or `docker run` commands. It walks through the same steps as the WebUI and calls
 the original Community Applications and dockerMan functions wherever they can be called. Only
 the parts that run in the browser (JavaScript) are replicated in PHP, with comments pointing to
@@ -20,15 +20,15 @@ Paths are relative to `/usr/local/emhttp/plugins/`.
 
 | File | Purpose |
 |---|---|
-| `src/ca-install/ca-install.php` | the CLI (single file) |
-| `src/ca-install/webui-action.php` | runs an original WebUI action script in a sub-process as if the WebUI had POSTed to it (whitelist: CA `exec.php`, dockerMan `UpdateConfig.php`) |
-| `build.sh` | builds `dist/ca-install.plg` with both files embedded |
+| `src/appctl/appctl.php` | the CLI (single file) |
+| `src/appctl/webui-action.php` | runs an original WebUI action script in a sub-process as if the WebUI had POSTed to it (whitelist: CA `exec.php`, dockerMan `UpdateConfig.php`) |
+| `build.sh` | builds `dist/appctl.plg` with both files embedded |
 | `plugin/CHANGES.md` | changelog shown in the Unraid Plugins tab |
 | `README.md`, `AGENTS.md`, `docs/*.md` | documentation (`AGENTS.md` stays in the root, where coding agents look for it) |
 | `tools/check-links.py` | checks relative links and anchors in the documentation (CI) |
 | `.github/workflows/build.yml` | link check, lint, build, round-trip check, release on tag |
 
-## The WebUI pipeline and how `ca-install` maps it
+## The WebUI pipeline and how `appctl` maps it
 
 ### 1. CA "Install" button → `createXML()` — ORIGINAL
 
@@ -40,7 +40,7 @@ folders, icon per theme, Tailscale fallback dir) and writes it to the template's
 cache. The browser then opens dockerMan with `?xmlTemplate=default:<path>`.
 
 `exec.php` is an action-switch script (it executes `$_POST['action']` when included and defines
-many globals), so `ca-install` runs it in a separate process via `webui-action.php` with exactly
+many globals), so `appctl` runs it in a separate process via `webui-action.php` with exactly
 that POST → `runCreateXML()`.
 
 ### 2. dockerMan "Add Container" page load — PHP ORIGINAL, PHP block + JavaScript REPLICATED
@@ -110,7 +110,7 @@ stops with `DOCKERMAN_CHANGED` instead of a PHP fatal error.
    references above. Port any change in the JavaScript form logic into `formPost()` /
    `applyUserInput()`.
 2. Pick an app, install it once **via the WebUI** (no changes in the form) and once with
-   `ca-install install <id> --name <other name> --dry-run`. Compare both `my-*.xml`: they must be
+   `appctl install <id> --name <other name> --dry-run`. Compare both `my-*.xml`: they must be
    identical except `Name`, `DateInstalled` and the appdata path that follows the name. Repeat
    with an app that has select variables, a password field and advanced fields, and with `--add`/`--set KEY.prop`/`--remove` against the same steps
    in the form.
@@ -124,17 +124,17 @@ The build machine needs no PHP (`build.sh` only uses bash/sed); the code runs ag
 Unraid files. For testing, copy the files to the server (RAM, not the flash drive) and run them there:
 
 ```
-scp src/ca-install/*.php root@unraid:/tmp/cai/
-ssh root@unraid 'php /tmp/cai/ca-install.php options <app-id> --name test --json'
+scp src/appctl/*.php root@unraid:/tmp/appctl/
+ssh root@unraid 'php /tmp/appctl/appctl.php options <app-id> --name test --json'
 ```
 
 Read-only commands (`search`, `info`, `options`, `install --dry-run`) are safe to run on a
-production server. `ca-install.php` can be included without running `main()` by defining
-`CAI_NO_MAIN` first – useful for testing single functions.
+production server. `appctl.php` can be included without running `main()` by defining
+`APPCTL_NO_MAIN` first – useful for testing single functions.
 
 ## Code conventions
 
 - Comments in the code reference the replicated source (`CreateDocker.php Z. …`).
-- Every error is a `CaiError(code, message, exitCode, details)`; codes are part of the public
+- Every error is a `AppctlError(code, message, exitCode, details)`; codes are part of the public
   interface ([USAGE.md](USAGE.md#exit-codes-and-error-codes), [AGENTS.md](../AGENTS.md)) – do not rename them.
 - Output for humans in `printHuman()`, everything else is data.
