@@ -16,6 +16,7 @@ and an entry under *Apps → Installed Apps*. `appctl edit` changes existing con
 - [Exit codes and error codes](#exit-codes-and-error-codes)
 - [Behaviour you should know](#behaviour-you-should-know)
 - [Examples](#examples)
+- [MCP mode](#mcp-mode)
 
 For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installation: [INSTALL.md](INSTALL.md).
 
@@ -32,6 +33,7 @@ For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installati
 | `appctl edit <container> [options] --dry-run` | Shows the changes, the new `my-*.xml` and the `docker run` command. | no |
 | `appctl edit <container> [options] --yes` | *Edit → Apply*: write the template, recreate the container (pull image if missing, stop, remove, run). | **yes** |
 | `appctl edit <container> [options] --yes --template-only` | Only rewrite the template; the container is not touched. | **yes** (template) |
+| `appctl mcp` | [MCP](#mcp-mode) server on stdin/stdout for AI agents and chat apps. | like the tools called |
 | `appctl update-feed` | Download / refresh the CA app feed with CA's own function (what opening the *Apps* tab does). Done automatically when the feed is missing, e.g. after a reboot. | CA's feed cache in RAM |
 | `appctl version` | Tool, Unraid and CA versions. | no |
 | `appctl --help` | Short help. | no |
@@ -336,3 +338,55 @@ Agent-style JSON:
 appctl options example-app --json | jq '.data.problems'
 appctl install example-app --set 80=8080 --yes --json | jq '.data.steps'
 ```
+
+## MCP mode
+
+`appctl mcp` serves the same commands as [MCP](https://modelcontextprotocol.io) tools over
+stdin/stdout. There is no daemon and no network port: the MCP client starts it over SSH and it ends
+with the session. Values travel as JSON, so nothing has to be quoted for a shell.
+
+Requirements: SSH login with a key (no password prompt) from the machine that runs the MCP client.
+
+Claude Code:
+```
+claude mcp add appctl -- ssh -o BatchMode=yes <unraid-host> appctl mcp
+```
+
+Clients with a JSON configuration (e.g. Claude Desktop):
+```json
+{
+  "mcpServers": {
+    "appctl": { "command": "ssh", "args": ["-o", "BatchMode=yes", "<unraid-host>", "appctl", "mcp"] }
+  }
+}
+```
+
+| Tool | Same as | Changes the server? |
+|---|---|---|
+| `search` | `appctl search` (`term`, `limit`) | no |
+| `info` | `appctl info` (`app`) | no |
+| `options` | `appctl options` (`app`) or `options --edit` (`container`) | no ¹ |
+| `install` | `appctl install` (`app`, `dry_run` – default `true`) | only with `dry_run: false` |
+| `edit` | `appctl edit` (`container`, `template_only`, `dry_run` – default `true`) | only with `dry_run: false` |
+| `update_feed` | `appctl update-feed` | CA's feed cache in RAM |
+| `version` | `appctl version` | no |
+
+The options of the CLI become structured arguments:
+
+| CLI | MCP argument |
+|---|---|
+| `--name`, `--network`, `--ip` | `name`, `network`, `ip` |
+| `--container KEY=VALUE` | `container_fields: {"KEY": "VALUE"}` |
+| `--set KEY=VALUE`, `--set KEY.prop=VALUE` | `set: {"KEY": "VALUE", "KEY.prop": "VALUE"}` |
+| `--add TYPE:TARGET=VALUE` | `add: [{"type": "TYPE", "target": "TARGET", "value": "VALUE"}]` |
+| `--remove KEY` | `remove: ["KEY"]` |
+| `--autostart`, `--autostart-wait N`, `--replace`, `--template-only` | `autostart: true`, `autostart_wait: N`, `replace: true`, `template_only: true` |
+| `--dry-run` / `--yes` | `dry_run: true` (default) / `dry_run: false` |
+
+Every tool result is one text block with exactly the JSON of `appctl <command> --json`
+([Output](#output-and---json)); errors are additionally flagged with `isError`. The server sends the
+agent rules from [AGENTS.md](../AGENTS.md) as instructions at startup. MCP clients usually ask before
+each tool call; `install` and `edit` are marked as destructive.
+
+Anyone who can use this MCP server can install and change containers on the server – add it only to
+clients you trust, like an SSH key.

@@ -27,6 +27,7 @@ Paths are relative to `/usr/local/emhttp/plugins/`.
 | `plugin/CHANGES.md` | changelog shown in the Unraid Plugins tab |
 | `README.md`, `AGENTS.md`, `docs/*.md` | documentation (`AGENTS.md` stays in the root, where coding agents look for it) |
 | `tools/check-links.py` | checks relative links and anchors in the documentation (CI) |
+| (in `appctl.php`) `mcp*()` | MCP server, see [MCP mode](#mcp-mode) |
 | `.github/workflows/build.yml` | link check, lint, build, round-trip check, release on tag |
 
 ## The WebUI pipeline and how `appctl` maps it
@@ -141,6 +142,21 @@ install produces the same template on both versions.
 - Stale Docker page cache (`dropStaleWebuiInfo()`): `DockerClient::removeContainer()` drops the
   `webui-info` entry of a container; a container renamed outside dockerMan leaves one behind with
   an outdated update status. Dropped before starting the new container.
+
+## MCP mode
+
+`appctl mcp` (`mcpServe()`): JSON-RPC 2.0, one message per line on stdin/stdout, no dependencies.
+Methods: `initialize` (answers with the client's protocol version if supported, else the newest
+one in `MCP_PROTOCOL_VERSIONS`), `ping`, `tools/list`, `tools/call`; notifications are ignored.
+
+- `mcpToOptions()` turns tool arguments into the same option array `parseArgs()` builds, then
+  `runCommand()` runs the same code as the CLI. Unknown arguments are rejected.
+- Results: one text block with the `--json` object, `isError` on errors. Output that Unraid code
+  might print is buffered and sent to stderr; `display_errors` goes to stderr – stdout carries only
+  protocol messages.
+- One process serves many calls: `loadDockerMan()` flushes dockerMan's static caches, warnings are
+  reset per call.
+- Tool descriptions and `MCP_INSTRUCTIONS` carry the agent rules (confirmation, secrets, no guessing).
 
 ## Unraid / CA versions
 

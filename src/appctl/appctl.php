@@ -80,6 +80,8 @@ Usage:
   appctl edit <container> [options] --dry-run   show changes, resulting template + docker command
   appctl edit <container> [options] --yes       Edit -> Apply: rewrite template, recreate container
              [--template-only]                 only rewrite the template, leave the container untouched
+  appctl mcp                                     MCP server on stdin/stdout for AI agents
+                                                   (e.g. command: ssh <unraid-host> appctl mcp)
   appctl update-feed [--json]                    download / refresh the CA app feed (done automatically when missing)
   appctl version [--json]
 
@@ -126,11 +128,15 @@ TXT;
 }
 $GLOBALS['APPCTL_VERSION_STR'] = APPCTL_VERSION;
 
+function defaultOptions(): array {
+  return ['cmd' => null, 'args' => [], 'json' => false, 'limit' => 20, 'name' => null, 'set' => [],
+          'container' => [], 'add' => [], 'remove' => [], 'network' => null, 'ip' => null,
+          'replace' => false, 'dry' => false, 'yes' => false, 'edit' => false, 'templateOnly' => false,
+          'autostart' => false, 'autostartWait' => null];
+}
+
 function parseArgs(array $argv): array {
-  $o = ['cmd' => null, 'args' => [], 'json' => false, 'limit' => 20, 'name' => null, 'set' => [],
-        'container' => [], 'add' => [], 'remove' => [], 'network' => null, 'ip' => null,
-        'replace' => false, 'dry' => false, 'yes' => false, 'edit' => false, 'templateOnly' => false,
-        'autostart' => false, 'autostartWait' => null];
+  $o = defaultOptions();
   $valueOpts = ['--limit' => 'limit', '--name' => 'name', '--network' => 'network', '--ip' => 'ip',
                 '--autostart-wait' => 'autostartWait'];
   $kvOpts = ['--set' => 'set', '--container' => 'container'];
@@ -171,6 +177,11 @@ function parseArgs(array $argv): array {
         }
     }
   }
+  return normalizeOptions($o);
+}
+
+/** Shared by the CLI and MCP: aliases and checks that do not depend on the input format. */
+function normalizeOptions(array $o): array {
   $o['limit'] = max(1, (int)$o['limit']);
   // Aliases: --container Name/Network/MyIP == --name/--network/--ip
   foreach ($o['container'] as $k => [$key, $val]) {
@@ -362,6 +373,7 @@ function loadDockerMan(): void {
   require_once "$docroot/webGui/include/Helpers.php";
   $var = parse_ini_file('state/var.ini');
   $DockerClient    = new DockerClient();
+  $DockerClient->flushCaches();   // static caches; matters when one process runs several commands (MCP)
   $DockerUpdate    = new DockerUpdate();
   $DockerTemplates = new DockerTemplates();
   $custom = DockerUtil::custom();
@@ -1359,6 +1371,231 @@ function writeTemplate(string $postXML, string $Name, string $Repository, string
 }
 
 #################################################################
+# MCP server (appctl mcp): JSON-RPC 2.0 over stdin/stdout
+#################################################################
+
+const MCP_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];   // newest first
+
+const MCP_INSTRUCTIONS = <<<'TXT'
+appctl installs Docker apps from Unraid Community Applications (CA) and edits existing containers,
+with the same result as the Unraid WebUI. Rules:
+- Never install or edit without the user's explicit confirmation. Call install/edit with dry_run=true
+  (the default), show the user the result (name, image, network, ports, paths, variables without
+  secrets, or the list of changes), wait for a clear "yes", then repeat the identical call with
+  dry_run=false.
+- Never guess: address apps by the exact name from search; on AMBIGUOUS show the candidates and use
+  the exact repository the user picks. App IDs change whenever the CA feed is downloaded again.
+- Values the user has to decide (passwords, domains, host paths for their data, ports on conflicts)
+  come from the user. Fields with "secret": true must never be echoed.
+- Use options (or options with container=...) until data.ready is true; pass the same arguments to
+  options, the dry run and the real call.
+- Labels and variables belong in fields (add), never in container_fields.ExtraParams.
+- An empty value falls back to the field's default; use remove instead.
+- Every result is the same JSON as `appctl <command> --json`: check ok, data, error.code, warnings.
+Full reference: https://github.com/tommibembel/appctl-for-unraid/blob/main/docs/USAGE.md
+TXT;
+
+/** JSON Schemas of the MCP tools. */
+function mcpTools(): array {
+  $obj = fn(array $props, array $required = []) => ['type' => 'object', 'properties' => $props ?: new stdClass(),
+                                                     'additionalProperties' => false] + ($required ? ['required' => $required] : []);
+  $str = fn(string $d) => ['type' => 'string', 'description' => $d];
+  $bool = fn(string $d) => ['type' => 'boolean', 'description' => $d];
+  $form = [
+    'name'    => $str('Container name (install: default is the template name; edit: renames the container).'),
+    'network' => $str('bridge | host | none | container:<name> | a custom network such as br0 (see data.networks of options).'),
+    'ip'      => $str('Fixed IP, only for custom networks like br0.'),
+    'container_fields' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'],
+      'description' => 'Other container fields, e.g. {"WebUI": "...", "ExtraParams": "--env-file /path", "Memory": "512m"}. Keys: see data.container_fields of options.'],
+    'set' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'],
+      'description' => 'Field values by set_key from options, e.g. {"80": "8080", "PUID": "99"}. "<set_key>.<prop>" changes a field property like the WebUI Edit button: name, target, default, mode, description, display, required, mask, e.g. {"/data.mode": "ro"}.'],
+    'add' => ['type' => 'array', 'description' => 'Add fields like "Add another Path, Port, Variable, Label or Device". Not idempotent: adding twice creates two fields. Name a new field with set {"<target>.name": "..."}.',
+      'items' => $obj(['type' => ['type' => 'string', 'enum' => ['Path', 'Port', 'Variable', 'Label', 'Device']],
+                       'target' => $str('Container path / container port / variable name / label key / device path.'),
+                       'value' => $str('Host path / host port / value. Not used for Device.')], ['type', 'target'])],
+    'remove' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'set_keys of fields to remove.'],
+    'autostart' => $bool('Enable autostart (Docker page toggle).'),
+    'autostart_wait' => ['type' => 'integer', 'minimum' => 0, 'description' => 'Autostart wait period in seconds (implies autostart).'],
+    'replace' => $bool('Allow replacing an existing container/template with the same name. Only on the user\'s explicit request: it stops and removes that container.'),
+  ];
+  $ro = ['readOnlyHint' => true, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => true];
+  $rw = ['readOnlyHint' => false, 'destructiveHint' => true, 'idempotentHint' => false, 'openWorldHint' => true];
+  return [
+    ['name' => 'search', 'title' => 'Search Community Applications',
+     'description' => 'Search the CA app feed by name, author, repository and description. Returns name, repository, author, ID per app. Use the exact name (or repository) as "app" in the other tools.',
+     'inputSchema' => $obj(['term' => $str('Search term.'), 'limit' => ['type' => 'integer', 'minimum' => 1, 'description' => 'Max results (default 20).']], ['term']),
+     'annotations' => $ro],
+    ['name' => 'info', 'title' => 'Raw CA template',
+     'description' => 'The raw template of an app as published in the CA feed (fields with defaults). For the settings adapted to this server use options.',
+     'inputSchema' => $obj(['app' => $str('Exact app name, exact repository, or an app ID from search.')], ['app']),
+     'annotations' => $ro],
+    ['name' => 'options', 'title' => 'Show settings',
+     'description' => 'The Add Container form (with "app") or the Edit form of an existing container (with "container") as data: every setting adapted to this server, problems (missing values, port conflicts with suggestions, name conflicts) and ready=true/false; for containers also the pending "changes". Repeat with the user\'s answers until ready is true. Changes nothing.',
+     'inputSchema' => $obj(['app' => $str('Exact app name, exact repository, or an app ID (install).'),
+                            'container' => $str('Name of an existing container (edit).')] + $form),
+     'annotations' => $ro],
+    ['name' => 'install', 'title' => 'Install an app',
+     'description' => 'Install a CA app like Install -> Apply in the WebUI. dry_run=true (default) only shows the resulting template and docker command. dry_run=false pulls the image, writes the template and starts the container – only after the user explicitly confirmed the dry run.',
+     'inputSchema' => $obj(['app' => $str('Exact app name, exact repository, or an app ID from search.')] + $form +
+                           ['dry_run' => $bool('true (default): preview only. false: really install.')], ['app']),
+     'annotations' => $rw],
+    ['name' => 'edit', 'title' => 'Edit a container',
+     'description' => 'Change an existing container like Edit -> Apply on the Docker page. dry_run=true (default) shows the changes, the new template and command. dry_run=false writes the template and recreates the container (short downtime) – only after the user explicitly confirmed the dry run. Renaming (name) removes the old container and template; autostart is not carried over unless autostart=true.',
+     'inputSchema' => $obj(['container' => $str('Name of the existing container.')] + $form +
+                           ['template_only' => $bool('Only rewrite the template, leave the container untouched.'),
+                            'dry_run' => $bool('true (default): preview only. false: really apply.')], ['container']),
+     'annotations' => $rw],
+    ['name' => 'update_feed', 'title' => 'Update CA feed',
+     'description' => 'Download/refresh the CA app feed (done automatically when missing). App IDs change afterwards.',
+     'inputSchema' => $obj([]), 'annotations' => ['readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => true]],
+    ['name' => 'version', 'title' => 'Versions',
+     'description' => 'appctl, Unraid and Community Applications versions.',
+     'inputSchema' => $obj([]), 'annotations' => $ro],
+  ];
+}
+
+/** MCP tool arguments -> the same option array the CLI builds. */
+function mcpToOptions(string $tool, array $a): array {
+  $o = defaultOptions();
+  $known = [];
+  foreach (mcpTools() as $t) if ($t['name'] === $tool) $known = array_keys((array)$t['inputSchema']['properties']);
+  foreach (array_keys($a) as $k) {
+    if (!in_array($k, $known, true)) throw new AppctlError('USAGE', "Unknown argument '$k' for $tool", EXIT_USAGE);
+  }
+  $string = function (string $k) use ($a): ?string {
+    if (!array_key_exists($k, $a) || $a[$k] === null) return null;
+    if (!is_string($a[$k]) && !is_int($a[$k])) throw new AppctlError('USAGE', "$k must be a string", EXIT_USAGE);
+    return (string)$a[$k];
+  };
+  $map = function (string $k) use ($a): array {
+    $v = $a[$k] ?? [];
+    if (!is_array($v) || ($v && array_is_list($v))) throw new AppctlError('USAGE', "$k must be an object", EXIT_USAGE);
+    $out = [];
+    foreach ($v as $key => $val) {
+      if (!is_scalar($val)) throw new AppctlError('USAGE', "$k.$key must be a string", EXIT_USAGE);
+      $out[] = [(string)$key, is_bool($val) ? ($val ? 'true' : 'false') : (string)$val];
+    }
+    return $out;
+  };
+  $bool = fn(string $k, bool $def) => array_key_exists($k, $a) ? (bool)$a[$k] : $def;
+
+  switch ($tool) {
+    case 'search':
+      if (trim((string)$string('term')) === '') throw new AppctlError('USAGE', 'term is required', EXIT_USAGE);
+      $o['args'] = [(string)$string('term')];
+      if (isset($a['limit'])) $o['limit'] = (int)$a['limit'];
+      return normalizeOptions($o);
+    case 'info':
+      $o['args'] = [(string)$string('app')];
+      return $o;
+    case 'update_feed': case 'version':
+      return $o;
+  }
+  // options / install / edit
+  $app = $string('app'); $ct = $string('container');
+  if ($tool === 'options' && ($app === null) === ($ct === null)) {
+    throw new AppctlError('USAGE', 'options needs either "app" (install) or "container" (edit)', EXIT_USAGE);
+  }
+  $o['edit'] = $tool === 'edit' || ($tool === 'options' && $ct !== null);
+  $o['args'] = [$o['edit'] ? $ct : $app];
+  if ($o['args'][0] === null || $o['args'][0] === '') throw new AppctlError('USAGE', ($o['edit'] ? 'container' : 'app').' is required', EXIT_USAGE);
+  $o['name'] = $string('name');
+  $o['network'] = $string('network');
+  $o['ip'] = $string('ip');
+  $o['container'] = $map('container_fields');
+  $o['set'] = $map('set');
+  foreach ((array)($a['add'] ?? []) as $i => $f) {
+    if (!is_array($f) || !isset($f['type'], $f['target'])) throw new AppctlError('USAGE', "add[$i] needs type and target", EXIT_USAGE);
+    $o['add'][] = strcasecmp($f['type'], 'Device') === 0 ? "Device:{$f['target']}" : "{$f['type']}:{$f['target']}=".($f['value'] ?? '');
+  }
+  foreach ((array)($a['remove'] ?? []) as $r) $o['remove'][] = (string)$r;
+  $o['autostart'] = $bool('autostart', false);
+  if (isset($a['autostart_wait'])) $o['autostartWait'] = (string)(int)$a['autostart_wait'];
+  $o['replace'] = $bool('replace', false);
+  $o['templateOnly'] = $bool('template_only', false);
+  if ($tool !== 'options') {
+    $dry = $bool('dry_run', true);
+    $o['dry'] = $dry; $o['yes'] = !$dry;
+  }
+  return normalizeOptions($o);
+}
+
+/** One tools/call: same JSON object as `appctl <command> --json`. Stray output of Unraid code goes to stderr. */
+function mcpCallTool(string $tool, array $args): array {
+  global $APPCTL_WARNINGS;
+  $APPCTL_WARNINGS = [];
+  $cmd = ['update_feed' => 'update-feed'][$tool] ?? $tool;
+  ob_start();
+  try {
+    if (!in_array($tool, array_column(mcpTools(), 'name'), true)) throw new AppctlError('USAGE', "Unknown tool '$tool'", EXIT_USAGE);
+    $data = runCommand($cmd, mcpToOptions($tool, $args));
+    $res = ['ok' => true, 'command' => $cmd, 'data' => $data, 'warnings' => $APPCTL_WARNINGS];
+  } catch (AppctlError $e) {
+    $res = ['ok' => false, 'error' => ['code' => $e->codeName, 'message' => $e->getMessage()] + $e->details, 'warnings' => $APPCTL_WARNINGS];
+  } catch (Throwable $e) {
+    $res = ['ok' => false, 'error' => ['code' => 'INTERNAL', 'message' => get_class($e).': '.$e->getMessage().' @ '.basename($e->getFile()).':'.$e->getLine()],
+            'warnings' => $APPCTL_WARNINGS];
+  }
+  $stray = ob_get_clean();
+  if ($stray !== '' && $stray !== false) fwrite(STDERR, $stray);
+  return ['content' => [['type' => 'text', 'text' => json_encode($res, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)]],
+          'isError' => !$res['ok']];
+}
+
+/** Handle one JSON-RPC message; returns the response or null for notifications. */
+function mcpHandle($msg): ?array {
+  if (!is_array($msg) || ($msg['jsonrpc'] ?? null) !== '2.0' || !isset($msg['method']) || !is_string($msg['method'])) {
+    return ['jsonrpc' => '2.0', 'id' => is_array($msg) ? ($msg['id'] ?? null) : null, 'error' => ['code' => -32600, 'message' => 'Invalid Request']];
+  }
+  $isRequest = array_key_exists('id', $msg);
+  $id = $msg['id'] ?? null;
+  $params = is_array($msg['params'] ?? null) ? $msg['params'] : [];
+  $ok = fn($result) => ['jsonrpc' => '2.0', 'id' => $id, 'result' => $result];
+  $err = fn(int $code, string $m) => ['jsonrpc' => '2.0', 'id' => $id, 'error' => ['code' => $code, 'message' => $m]];
+  switch ($msg['method']) {
+    case 'initialize':
+      $v = in_array($params['protocolVersion'] ?? '', MCP_PROTOCOL_VERSIONS, true) ? $params['protocolVersion'] : MCP_PROTOCOL_VERSIONS[0];
+      return $ok(['protocolVersion' => $v, 'capabilities' => ['tools' => ['listChanged' => false]],
+                  'serverInfo' => ['name' => 'appctl', 'title' => 'appctl for Unraid', 'version' => APPCTL_VERSION],
+                  'instructions' => MCP_INSTRUCTIONS]);
+    case 'ping':
+      return $isRequest ? $ok(new stdClass()) : null;
+    case 'tools/list':
+      return $ok(['tools' => mcpTools()]);
+    case 'tools/call':
+      if (!isset($params['name']) || !is_string($params['name'])) return $err(-32602, 'Missing tool name');
+      if (!in_array($params['name'], array_column(mcpTools(), 'name'), true)) return $err(-32602, "Unknown tool: {$params['name']}");
+      $args = $params['arguments'] ?? [];
+      if (!is_array($args)) return $err(-32602, 'arguments must be an object');
+      return $ok(mcpCallTool($params['name'], $args));
+  }
+  if (!$isRequest) return null;   // notifications (initialized, cancelled, …) need no answer
+  return $err(-32601, "Method not found: {$msg['method']}");
+}
+
+/** `appctl mcp`: serve MCP over stdio (one JSON-RPC message per line) until stdin closes. */
+function mcpServe(): int {
+  ini_set('display_errors', 'stderr');   // stdout carries only JSON-RPC messages
+  while (($line = fgets(STDIN)) !== false) {
+    $line = trim($line);
+    if ($line === '') continue;
+    $msg = json_decode($line, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+      $resp = ['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => -32700, 'message' => 'Parse error']];
+    } elseif (is_array($msg) && array_is_list($msg)) {
+      $resp = ['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => -32600, 'message' => 'Batches are not supported']];
+    } else {
+      $resp = mcpHandle($msg);
+    }
+    if ($resp !== null) {
+      fwrite(STDOUT, json_encode($resp, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)."\n");
+      fflush(STDOUT);
+    }
+  }
+  return EXIT_OK;
+}
+
+#################################################################
 # Output
 #################################################################
 
@@ -1451,23 +1688,29 @@ function printHuman(string $cmd, array $d): void {
   }
 }
 
+/** Run one command with parsed options; returns its data or throws AppctlError. */
+function runCommand(string $cmd, array $o): array {
+  switch ($cmd) {
+    case 'search':  checkEnvironment(); return cmdSearch($o);
+    case 'info':    checkEnvironment(); return cmdInfo($o);
+    case 'options': return cmdOptions($o);
+    case 'install': return cmdInstall($o);
+    case 'edit':    return cmdEdit($o);
+    case 'update-feed': checkEnvironment(); return updateFeed();
+    case 'version': return ['appctl' => APPCTL_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()];
+  }
+  throw new AppctlError('USAGE', "Unknown command '$cmd' (see appctl --help)", EXIT_USAGE);
+}
+
 function main(array $argv): int {
   global $APPCTL_WARNINGS;
   $json = in_array('--json', $argv, true);
   try {
     $o = parseArgs($argv);
     $cmd = $o['cmd'] ?? 'help';
-    switch ($cmd) {
-      case 'help':    fwrite(STDOUT, usage()); return EXIT_OK;
-      case 'search':  checkEnvironment(); $data = cmdSearch($o); break;
-      case 'info':    checkEnvironment(); $data = cmdInfo($o); break;
-      case 'options': $data = cmdOptions($o); break;
-      case 'install': $data = cmdInstall($o); break;
-      case 'edit':    $data = cmdEdit($o); break;
-      case 'update-feed': checkEnvironment(); $data = updateFeed(); break;
-      case 'version': $data = ['appctl' => APPCTL_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()]; break;
-      default: throw new AppctlError('USAGE', "Unknown command '$cmd' (see appctl --help)", EXIT_USAGE);
-    }
+    if ($cmd === 'help') { fwrite(STDOUT, usage()); return EXIT_OK; }
+    if ($cmd === 'mcp') return mcpServe();
+    $data = runCommand($cmd, $o);
     if ($json) {
       echo json_encode(['ok' => true, 'command' => $cmd, 'data' => $data, 'warnings' => $APPCTL_WARNINGS],
         JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), "\n";

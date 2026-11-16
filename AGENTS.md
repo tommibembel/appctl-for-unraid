@@ -24,6 +24,11 @@ ssh <unraid-host> appctl <command> ... --json
 Parse stdout as one JSON object. Check `ok`; on `false` act on `error.code` (table below).
 Always read `warnings` and pass relevant ones on to the user.
 
+If your client is connected to `appctl mcp` ([MCP mode](docs/USAGE.md#mcp-mode)), use its tools
+instead: same commands, same JSON in the result, structured arguments (no shell quoting).
+`install`/`edit` with `dry_run: true` correspond to `--dry-run`, `dry_run: false` to `--yes`. All
+rules below apply unchanged.
+
 ## Rules
 
 1. **Never install without the user's explicit confirmation.** Show the user what will be

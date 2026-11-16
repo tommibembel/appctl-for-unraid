@@ -1,3 +1,6 @@
+###2026.11.16d
+- New: MCP mode `appctl mcp` – the same commands as MCP tools for AI agents and chat apps, started over SSH (no daemon, no port)
+
 ###2026.11.16c
 - New command `edit`: change an existing container like Edit -> Apply on the Docker page (same options as install, rename, --template-only); `options --edit` shows the form and the pending changes
 - Shell syntax check of the generated docker command before install/edit (raw labels in Extra Parameters would break the next update)

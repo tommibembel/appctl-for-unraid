@@ -48,6 +48,8 @@ like a click in the WebUI. Details: [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 - Everything the *Add Container* form can do (except Tailscale): container fields, field values,
   field properties (*Edit*), add/remove fields, autostart
 - `--json` output with stable error codes and exit codes
+- **MCP mode** (`appctl mcp`): the same commands as MCP tools for AI agents and chat apps, started
+  over SSH – no daemon, no open port
 - Safe by default: nothing is installed without `--yes`; ambiguous apps, name conflicts, missing
   required values, host port conflicts and broken *Extra Parameters* (shell syntax check) stop
   before anything is changed
