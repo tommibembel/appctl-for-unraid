@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- Unraid **7.x** (tested: 7.1.2 – see [Limitations](../README.md#limitations))
+- Unraid **7.x** (tested versions: see [Limitations](../README.md#limitations))
 - **Community Applications** plugin installed. The app feed is downloaded automatically when
   needed (also after a reboot); opening the *Apps* tab is not required.
 - Internet access from the server (for the app feed and image pulls)
@@ -13,7 +13,7 @@
 
 ## Install the plugin
 
-### From GitHub (once the repository is public)
+### From GitHub
 
 WebUI: **Plugins → Install Plugin**, paste
 
@@ -56,7 +56,7 @@ because Unraid re-installs all plugins in `/boot/config/plugins/` at boot.
 
 ## Update
 
-- WebUI: **Plugins** → *Check for Updates* → *Update* (needs the public GitHub release).
+- WebUI: **Plugins** → *Check for Updates* → *Update*.
 - Command line: `plugin update appctl.plg`
 - From a newer local file: `plugin install /tmp/appctl.plg` again.
 
@@ -94,9 +94,11 @@ and pull request: PHP syntax check, build, and a check that the embedded files c
 
 To publish a version:
 
-1. Add a section `###YYYY.MM.DD` at the top of [`plugin/CHANGES.md`](../plugin/CHANGES.md).
+1. Add a section `###YYYY.MM.DD` at the top of [`plugin/CHANGES.md`](../plugin/CHANGES.md). Versions
+   are dates; a second release on the same day gets a letter (`YYYY.MM.DDa`, `b`, …). Unraid compares
+   versions as strings, so never go back to a shorter form on the same day.
 2. If tested on a new Unraid / CA version, update the tested versions in the README.
-3. Tag and push: `git tag 2026.11.16 && git push origin 2026.11.16`.
+3. Tag and push: `git tag YYYY.MM.DD && git push origin YYYY.MM.DD`.
 
 The Action then creates a GitHub release with `appctl.plg`. The plugin's `pluginURL` points
 to the latest release, so the Unraid *Plugins* tab offers the update automatically.

@@ -1,11 +1,12 @@
 <?php
 /*
- * appctl – install Docker apps on Unraid from the command line
+ * appctl – install and edit Docker apps on Unraid from the command line
  * Copyright (C) 2026 tommibembel
  * SPDX-License-Identifier: GPL-2.0-only
  *
  * Installs Docker apps from the Unraid Community Applications (CA) store from
- * the command line, producing the same result as "Install" -> "Apply" in the WebUI.
+ * the command line, producing the same result as "Install" -> "Apply" in the WebUI;
+ * `edit` changes existing containers like "Edit" -> "Apply" on the Docker page.
  *
  * Pipeline (mirrors the WebUI):
  *   1. CA "Install" click  -> ORIGINAL createXML() (community.applications/include/exec.php)
@@ -15,8 +16,8 @@
  *   3. "Apply"             -> ORIGINAL postToXML(), xmlToCommand(), pullImage(), stopContainer(),
  *                             removeContainer(), addRoute() (dynamix.docker.manager/include/Helpers.php)
  *
- * Everything marked "REPLICATED" is copied logic from Unraid 7.1.2 sources and
- * must be re-checked when Unraid changes. Line numbers refer to Unraid 7.1.2.
+ * Everything marked "REPLICATED" is copied logic from Unraid sources and must be
+ * re-checked when Unraid changes. Line numbers refer to Unraid 7.1.2 unless marked 7.4.
  */
 
 const APPCTL_VERSION = '0.1.0-dev';
@@ -65,7 +66,7 @@ function warn(string $msg): void { global $APPCTL_WARNINGS; $APPCTL_WARNINGS[] =
 
 function usage(): string {
   return <<<TXT
-appctl {$GLOBALS['APPCTL_VERSION_STR']} – install Community Applications from the command line
+appctl {$GLOBALS['APPCTL_VERSION_STR']} – install Community Applications and edit containers from the command line
 
 Usage:
   appctl search <term> [--limit N] [--json]

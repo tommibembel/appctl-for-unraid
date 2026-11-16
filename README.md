@@ -1,8 +1,8 @@
 # appctl for Unraid
 
 `appctl` installs Docker apps from the **Community Applications** store on an Unraid server from
-the command line – with the same result as clicking **Install → Apply** in the WebUI. Built for AI
-agents and scripts, usable by humans.
+the command line – with the same result as clicking **Install → Apply** in the WebUI – and changes
+existing containers like **Edit → Apply**. Built for AI agents and scripts, usable by humans.
 
 *Independent community project – not affiliated with or endorsed by Lime Technology or the
 Community Applications project.*
@@ -60,7 +60,7 @@ Where to go next:
 |---|---|
 | install, update or remove the plugin, or build it yourself | [docs/INSTALL.md](docs/INSTALL.md) |
 | use the command: all options, JSON output, error codes, examples | [docs/USAGE.md](docs/USAGE.md) |
-| let an AI agent install apps, or let an agent work on this code | [AGENTS.md](AGENTS.md) |
+| let an AI agent install or change apps, or let an agent work on this code | [AGENTS.md](AGENTS.md) |
 | understand how it works or check it against a new Unraid version | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 
 Suggested order for a new user: this README → [Install](docs/INSTALL.md) →
@@ -78,11 +78,13 @@ Requires Unraid 7.x with the Community Applications plugin. See [INSTALL.md](doc
 
 ## Limitations
 
-- **Tested with Unraid 7.1.2, 7.1.4 and 7.4.0** and Community Applications 2026.07.21. It uses
+- **Tested with Unraid 7.1.2, 7.1.4 and 7.4.0** (`edit`: 7.4.0) and Community Applications 2026.07.21. It uses
   internal, non-public Unraid and CA functions, which can change with any update. Other versions
   are not checked or blocked – using them is up to you. Preview with `--dry-run` first.
 - The dockerMan form runs in the browser; that part is replicated in PHP and is the piece most
   likely to need an update after an Unraid release.
+- `edit` only works for containers that have a dockerMan template (created with the Docker page or
+  Community Applications), not for containers created with `docker run` or compose.
 - No Tailscale integration yet ([issue #1](https://github.com/tommibembel/appctl-for-unraid/issues/1)).
 - Docker containers only (no plugins from CA).
 - Run as root on the server (like the WebUI).

@@ -63,7 +63,8 @@ appctl install example-app --set 80=8080 --yes       # install
 ```
 
 `options`, `install --dry-run` and `install --yes` take **the same arguments** and run through the
-same code, so whatever `options` reports as ready also installs.
+same code, so whatever `options` reports as ready also installs. The same holds for
+`options --edit`, `edit --dry-run` and `edit --yes`.
 
 ## Changing an existing container (`edit`)
 
@@ -167,6 +168,7 @@ Host port 80 is taken by the Unraid WebUI, so the template's default port confli
 
 ```json
 {
+  "mode": "install",
   "app": { "id": 1234, "name": "example-app", "author": "example",
            "repository": "ghcr.io/example/example-app", "deprecated": false, "compatible": true, "...": "..." },
   "ready": false,
@@ -268,12 +270,16 @@ Error details: `UNKNOWN_FIELD` lists all `fields` (or `available` container fiel
 - *Appdata path follows the container name.* In the WebUI the `/config` appdata path keeps the
   template name even if you rename the container – a second instance would share data with the
   first one. `appctl` uses the final name (`/mnt/user/appdata/<name>`).
-- *Port conflict check.* A human sees conflicts in the form, an agent doesn't. Before installing,
-  host ports on `bridge`/`host` networks are checked against listening sockets and the port
-  bindings of all existing containers (also stopped ones, as warning). Conflicts stop the install
-  and come with a free port suggestion (port + 8000, e.g. 80 → 8080).
+- *Port conflict check.* A human sees conflicts in the form, an agent doesn't. Before installing or
+  editing, host ports on `bridge`/`host` networks are checked against listening sockets and the port
+  bindings of all existing containers (also stopped ones, as warning); the edited container's own
+  ports don't count. Conflicts stop the install and come with a free port suggestion (port + 8000,
+  e.g. 80 → 8080).
 - *Name conflicts stop the install.* CA would silently append `-1`; `appctl` refuses unless
-  `--replace` or a different `--name` is given.
+  `--replace` or a different `--name` is given. The same for renaming with `edit` onto a name another
+  container uses – the WebUI would silently replace that container.
+- *Shell syntax check.* The generated command is checked with `/bin/sh -n` before anything is
+  changed (`INVALID_COMMAND`); the WebUI runs it and fails halfway.
 - *Image first.* The image is pulled before the template is written, so a failed pull leaves
   nothing behind.
 - *Stale Docker page cache.* If the Docker page still has cached info for a name without a
@@ -283,10 +289,12 @@ Error details: `UNKNOWN_FIELD` lists all `fields` (or `available` container fiel
 **Not supported yet:** the Tailscale section of the form ([issue #1](https://github.com/tommibembel/appctl-for-unraid/issues/1)).
 Templates that enable Tailscale are refused with `UNSUPPORTED`.
 
-**What a real install writes:**
-- `/boot/config/plugins/dockerMan/templates-user/my-<name>.xml` (the template)
+**What a real install or edit writes:**
+- `/boot/config/plugins/dockerMan/templates-user/my-<name>.xml` (the template; a rename with `edit`
+  deletes the old one)
 - host directories of path fields that do not exist yet (owner `nobody:users`, like the WebUI)
-- the image, the container, and with `--autostart` an entry in `/var/lib/docker/unraid-autostart`
+- the image, the container (`edit` removes and recreates it), and with `--autostart` an entry in
+  `/var/lib/docker/unraid-autostart`
 
 ## Examples
 

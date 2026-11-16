@@ -13,7 +13,8 @@ the original Community Applications and dockerMan functions wherever they can be
 the parts that run in the browser (JavaScript) are replicated in PHP, with comments pointing to
 the source lines.
 
-All line references below are for **Unraid 7.1.2** with **Community Applications 2026.07.21**.
+Line references below are for **Unraid 7.1.2** unless marked *7.4* (Unraid 7.4.0), with
+**Community Applications 2026.07.21**.
 Paths are relative to `/usr/local/emhttp/plugins/`.
 
 ## Files
@@ -84,7 +85,7 @@ that POST → `runCreateXML()`.
 - dockerMan's own dry run (`dryRun=true`) **saves the template too**, so it is not used;
   `--dry-run` only calls `postToXML()` and `xmlToCommand($xml, false)`.
 
-### `edit`: Edit → Apply for an existing container
+### 4. `edit`: Edit → Apply for an existing container
 
 - Load: `DockerTemplates::getUserTemplate($name)` — **original** (the Docker page's Edit link), then
   `CreateDocker.php` "LOAD TEMPLATE" with `xmlType=edit` (7.4: lines 332-390): `xmlToVar()`, the
@@ -107,7 +108,7 @@ that POST → `runCreateXML()`.
   `options`: `xmlToCommand()` inserts `ExtraParams`/`PostArgs` unquoted, and dockerMan runs the
   command with `popen()`.
 
-### 4. Differences between Unraid versions
+### 5. Differences between Unraid versions
 
 The same code supports 7.1.x and 7.4. Newer form fields are detected by the dockerMan functions
 that came with them (`newerFormFields()`), not by version numbers:
@@ -123,7 +124,7 @@ Also new in 7.4: `DockerTemplates::getUserTemplatePath()` (case-insensitive temp
 used when present (`userTemplatePath()`). `postToXML()` writes the new elements itself, so a default
 install produces the same template on both versions.
 
-### 5. Extras that are not part of the Apply flow
+### 6. Extras that are not part of the Apply flow
 
 - CA app feed: lives in RAM (`/tmp/community.applications/tempFiles/templates_new.json`) and is gone
   after every reboot. When it is missing, `loadFeed()` calls CA's **original** `force_update()`
@@ -157,13 +158,16 @@ stops with `DOCKERMAN_CHANGED` instead of a PHP fatal error.
    references above. Port any change in the JavaScript form logic into `formPost()` /
    `applyUserInput()`.
 2. Pick an app, install it once **via the WebUI** (no changes in the form) and once with
-   `appctl install <id> --name <other name> --dry-run`. Compare both `my-*.xml`: they must be
+   `appctl install <app> --name <other name> --dry-run`. Compare both `my-*.xml`: they must be
    identical except `Name`, `DateInstalled` and the appdata path that follows the name. Repeat
    with an app that has select variables, a password field and advanced fields, and with `--add`/`--set KEY.prop`/`--remove` against the same steps
    in the form.
 3. Real install of a harmless app; check in the WebUI: icon, update status (*up-to-date*),
    *Edit* shows the same values, *Apps → Installed Apps* lists it.
-4. Update the tested versions in the README (Limitations), add a changelog entry, tag a release.
+4. `edit`: on that test container, save `appctl edit <name> <changes> --dry-run --json` (`.data.xml`),
+   make the same changes in the WebUI (*Edit → Apply*) and compare the written `my-*.xml`: identical
+   except `DateInstalled`. Also try a rename of a running and of a stopped container.
+5. Update the tested versions in the README (Limitations), add a changelog entry, tag a release.
 
 ## Local testing
 
@@ -172,16 +176,16 @@ Unraid files. For testing, copy the files to the server (RAM, not the flash driv
 
 ```
 scp src/appctl/*.php root@unraid:/tmp/appctl/
-ssh root@unraid 'php /tmp/appctl/appctl.php options <app-id> --name test --json'
+ssh root@unraid 'php /tmp/appctl/appctl.php options <app> --name test --json'
 ```
 
-Read-only commands (`search`, `info`, `options`, `install --dry-run`) are safe to run on a
+Read-only commands (`search`, `info`, `options`, `install --dry-run`, `edit --dry-run`) are safe to run on a
 production server. `appctl.php` can be included without running `main()` by defining
 `APPCTL_NO_MAIN` first – useful for testing single functions.
 
 ## Code conventions
 
-- Comments in the code reference the replicated source (`CreateDocker.php Z. …`).
+- Comments in the code reference the replicated source (`CreateDocker.php line …`).
 - Every error is a `AppctlError(code, message, exitCode, details)`; codes are part of the public
   interface ([USAGE.md](USAGE.md#exit-codes-and-error-codes), [AGENTS.md](../AGENTS.md)) – do not rename them.
 - Output for humans in `printHuman()`, everything else is data.

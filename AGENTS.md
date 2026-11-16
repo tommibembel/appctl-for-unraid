@@ -4,8 +4,8 @@
 
 Instructions for AI agents (Claude Code, Codex, Hermes, …). Two parts:
 
-- **[Part 1 – Using appctl](#part-1--using-appctl)**: installing Community Applications on
-  an Unraid server with the tool.
+- **[Part 1 – Using appctl](#part-1--using-appctl)**: installing Community Applications and
+  changing existing containers on an Unraid server with the tool.
 - **[Part 2 – Working on this repository](#part-2--working-on-this-repository)**: goals,
   principles and safety rules when changing or testing the code.
 
@@ -120,8 +120,10 @@ What to ask in step 2 – keep it short:
 - An **empty value falls back to the field's default** (dockerMan behaviour). To get rid of a
   placeholder value, use `--remove KEY`, not `--set KEY=`.
 - `options` returns exit code 0 even when not ready – check `data.ready`.
-- Pass the **same arguments** to `options`, `--dry-run` and `--yes`. Keep them in one list and
-  only append to it.
+- Pass the **same arguments** to `options`, `--dry-run` and `--yes` (`edit`: `options --edit`,
+  `edit --dry-run`, `edit --yes`). Keep them in one list and only append to it.
+- `--add` is not idempotent: running the same `edit … --add Label:X=…` twice adds a second field.
+  Check `options --edit` first; to change an existing field use `--set`.
 - Quote values with spaces or shell characters. Over SSH the remote shell parses the command a
   second time, so quote twice or pass the command via a heredoc:
   ```
@@ -142,14 +144,15 @@ line references, how to verify a new Unraid version).
 A small Unraid plugin with a CLI command `appctl` that installs Community Applications
 **with exactly the same result as Install → Apply in the WebUI**: `my-<name>.xml` with the
 original CA metadata (TemplateURL, Icon, Support, …), icon, update check, *Edit*, entry under
-*Installed Apps*.
+*Installed Apps*. `appctl edit` changes existing containers with the same result as
+**Edit → Apply**.
 
 **Not** a re-implementation "from the outside" (hand-written XML plus `docker run`), but a call
 of the **original Unraid / CA functions**.
 
 Why not something else:
 - **Unraid GraphQL API**: can start/stop/update/remove containers and install plugins, but cannot
-  create containers from CA templates (on 7.1 also only via the Unraid Connect plugin).
+  create containers from CA templates or edit their templates.
 - **Remote-controlling the WebUI**: works, but fragile and needs a login session.
 - **Hand-written templates**: CA compatibility (icon, update check, *Installed Apps*) not guaranteed.
 
@@ -173,7 +176,8 @@ Why not something else:
 
 ## Definition of done for a change
 
-- `install --dry-run` output matches a WebUI install for the same input.
+- `install --dry-run` output matches a WebUI install for the same input; `edit --dry-run` matches
+  *Edit → Apply* in the WebUI for the same changes.
 - A real install of a harmless test app shows icon, update status *up-to-date*, *Edit* with the
   same values and an entry under *Installed Apps*.
 - `--dry-run` and `--json` work; error codes and exit codes are documented.
@@ -190,8 +194,8 @@ Test servers are usually somebody's production NAS. Therefore:
 - **Reading is fine; writing needs the owner's explicit OK** for that specific step: installing
   plugins, files under `/boot`, pulling images, creating/starting/stopping/removing containers,
   changing app configs. An OK for one step does not cover the next kind of action.
-- `search`, `info`, `options` and `install --dry-run` are read-only (except CA's own cache in RAM)
-  and safe to run.
+- `search`, `info`, `options`, `install --dry-run` and `edit --dry-run` are read-only (except CA's
+  own cache in RAM) and safe to run.
 - Put test copies of the code in `/tmp` (RAM), never on the flash drive (`/boot`).
 - Never stop, recreate or remove containers that are not the agreed test object. Before replacing
   something, back up what will be overwritten and keep a way back.
