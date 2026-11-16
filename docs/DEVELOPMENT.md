@@ -84,6 +84,29 @@ that POST → `runCreateXML()`.
 - dockerMan's own dry run (`dryRun=true`) **saves the template too**, so it is not used;
   `--dry-run` only calls `postToXML()` and `xmlToCommand($xml, false)`.
 
+### `edit`: Edit → Apply for an existing container
+
+- Load: `DockerTemplates::getUserTemplate($name)` — **original** (the Docker page's Edit link), then
+  `CreateDocker.php` "LOAD TEMPLATE" with `xmlType=edit` (7.4: lines 332-390): `xmlToVar()`, the
+  `container:` network split and the overview handling — **replicated** in `prepareEdit()` /
+  `finishTemplateLoad()`. Unlike `xmlType=default` there are no `/config` and `/unraid` overrides.
+- Form: same `formPost()` as for a new container, plus the hidden input `existingContainer` (only if
+  the container exists, 7.4 line 983). 7.4 also posts `sourceTemplate` (line 980): Apply then writes
+  to the edited file when the name is unchanged, otherwise to `getUserTemplatePath(<new name>)`;
+  7.1 always writes `my-<name>.xml`.
+- Apply (7.4 lines 129-235, `doInstall()` with `$existing`): remove the container with the new name;
+  if renamed, stop/remove the old container (`removeContainer($existing, 1)`) and delete its template;
+  if the old container was stopped, the new one is only created (`docker create`), not started.
+  Deviations as for install (pull first, output captured), plus: a different container that already
+  has the new name is only replaced with `--replace` (the WebUI replaces it silently).
+- `--template-only`: only the template write (incl. icon cache cleanup).
+- Changes are computed on `xmlToVar()` of the old and the new template (`settingsDiff()`), not on the
+  bytes: libxml/`postToXML()` serialise differently between releases (`&#xD;` vs `&#13;`, empty
+  elements for newer fields) without changing any setting.
+- `/bin/sh -n` check of the generated command (`shellSyntaxError()`), also for `install` and in
+  `options`: `xmlToCommand()` inserts `ExtraParams`/`PostArgs` unquoted, and dockerMan runs the
+  command with `popen()`.
+
 ### 4. Differences between Unraid versions
 
 The same code supports 7.1.x and 7.4. Newer form fields are detected by the dockerMan functions

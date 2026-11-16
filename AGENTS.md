@@ -42,9 +42,13 @@ Always read `warnings` and pass relevant ones on to the user.
    existing container.
 6. **Do not edit `my-*.xml` files or run `docker run` yourself.** Everything the WebUI form can do
    is available as an option (`--container`, `--set`, `--set KEY.prop`, `--add`, `--remove`,
-   `--autostart`). If something is not possible, tell the user instead of working around the tool.
+   `--autostart`), for new containers (`install`) and existing ones (`edit`). Never put labels or
+   variables into `ExtraParams`; use `--add Label:KEY=VALUE` / `--add Variable:KEY=VALUE`. If
+   something is not possible, tell the user instead of working around the tool.
 7. **Environment errors (`exit 7`) are not yours to fix.** Report them to the user.
    `DOCKERMAN_CHANGED` means this Unraid version lacks a function the tool needs.
+8. **`edit --yes` recreates the container** (short downtime, like *Apply* in the WebUI). Show the
+   `changes` from `--dry-run` and get a "yes" first, just like for an install.
 
 ## Workflow
 
@@ -65,6 +69,21 @@ Always read `warnings` and pass relevant ones on to the user.
                -> report data.steps; on error report error.message and stop
 ```
 
+Changing an existing container (same loop, other commands):
+
+```
+1. options     appctl options --edit <container> [changes …] --json
+               -> data.changes = what would change; data.problems as above
+2. preview     appctl edit <container> <same arguments> --dry-run --json
+               -> show the user data.changes (secret values are masked), rename, autostart
+3. confirm     wait for the user's "yes"
+4. apply       appctl edit <container> <same arguments> --yes --json
+```
+
+`data.unchanged == true` means there is nothing to apply. Use `--template-only` only when the user
+wants the running container left alone. A rename (`--name`) does not keep autostart unless you pass
+`--autostart` (the tool warns).
+
 What to ask in step 2 – keep it short:
 - Container **name** and **network** (show `data.networks`; `br0`-like networks give the container
   its own LAN IP and need `--ip` or DHCP from Docker's range).
@@ -81,7 +100,9 @@ What to ask in step 2 – keep it short:
 | `error.code` | Action |
 |---|---|
 | `AMBIGUOUS` | Show `error.candidates`, let the user choose, use the ID. |
-| `NOT_FOUND` | Run `search` with a broader term. |
+| `NOT_FOUND` | Run `search` with a broader term (`edit`: check the container name). |
+| `NO_TEMPLATE` | The container was not created via the Docker page / CA; it cannot be edited with the tool – tell the user. |
+| `INVALID_COMMAND` | `ExtraParams`/`PostArgs` break the shell command. Move labels/variables into fields (`--add Label:…`), fix the rest with `--container ExtraParams=…`. |
 | `NAME_CONFLICT` | Propose another `--name`, or ask about `--replace` (rule 5). |
 | `MISSING_REQUIRED` | Ask the user for each entry in `error.missing`, add `--set KEY=VALUE`. |
 | `PORT_CONFLICT` | Propose `suggested_port` per entry in `error.conflicts`, or a custom network. |

@@ -5,11 +5,13 @@
 `appctl` installs Docker apps from the Unraid **Community Applications** (CA) store from the
 command line. The result is the same as clicking **Install → Apply** in the WebUI: a
 `my-<name>.xml` user template with the original CA metadata, icon, update check, *Edit* support
-and an entry under *Apps → Installed Apps*.
+and an entry under *Apps → Installed Apps*. `appctl edit` changes existing containers like
+**Edit → Apply** on the Docker page.
 
 - [Commands](#commands)
 - [Typical workflow](#typical-workflow)
-- [Options for `options` and `install`](#options-for-options-and-install)
+- [Changing an existing container (`edit`)](#changing-an-existing-container-edit)
+- [Options for `options`, `install` and `edit`](#options-for-options-install-and-edit)
 - [Output and `--json`](#output-and---json)
 - [Exit codes and error codes](#exit-codes-and-error-codes)
 - [Behaviour you should know](#behaviour-you-should-know)
@@ -26,6 +28,10 @@ For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installati
 | `appctl options <app> [options]` | The *Add Container* form as data: every setting **already adapted to this server** (appdata path, network, …) plus problems (missing values, port conflicts, name conflicts) and `ready: true/false`. | no ¹ |
 | `appctl install <app> [options] --dry-run` | Shows the resulting `my-*.xml` and the `docker run` command. | no ¹ |
 | `appctl install <app> [options] --yes` | Really installs: pull image, write template, start container, optional autostart. | **yes** |
+| `appctl options --edit <container> [options]` | The *Edit* form of an existing container as data, plus `changes` (what the options would change). | no |
+| `appctl edit <container> [options] --dry-run` | Shows the changes, the new `my-*.xml` and the `docker run` command. | no |
+| `appctl edit <container> [options] --yes` | *Edit → Apply*: write the template, recreate the container (pull image if missing, stop, remove, run). | **yes** |
+| `appctl edit <container> [options] --yes --template-only` | Only rewrite the template; the container is not touched. | **yes** (template) |
 | `appctl update-feed` | Download / refresh the CA app feed with CA's own function (what opening the *Apps* tab does). Done automatically when the feed is missing, e.g. after a reboot. | CA's feed cache in RAM |
 | `appctl version` | Tool, Unraid and CA versions. | no |
 | `appctl --help` | Short help. | no |
@@ -44,7 +50,7 @@ cache in RAM (`/tmp/community.applications/tempFiles/…`). Nothing else is writ
 If more than one template matches, nothing is guessed: the command fails with `AMBIGUOUS` and
 lists the candidates with their IDs.
 
-`install` without `--dry-run` or `--yes` does nothing and exits with `CONFIRMATION_REQUIRED`.
+`install` and `edit` without `--dry-run` or `--yes` do nothing and exit with `CONFIRMATION_REQUIRED`.
 
 ## Typical workflow
 
@@ -62,7 +68,42 @@ appctl install 1234 --name example-app \
 `options`, `install --dry-run` and `install --yes` take **the same arguments** and run through the
 same code, so whatever `options` reports as ready also installs.
 
-## Options for `options` and `install`
+## Changing an existing container (`edit`)
+
+`edit` is the Docker page's **Edit → Apply** for a container that has a template
+(`my-*.xml`, i.e. created with the Docker page or Community Applications). It loads the template
+like the *Edit* form, applies your options and writes the result like *Apply*:
+
+```
+appctl options --edit example-app                           # current settings as data
+appctl edit example-app --add Label:com.example.backup=true \
+    --dry-run                                               # shows the changes, XML and command
+appctl edit example-app --add Label:com.example.backup=true \
+    --yes                                                   # apply: recreates the container
+```
+
+- The options are the same as for `install`, but they change the **current** settings of the
+  container instead of the CA template. `--set`, `--set KEY.prop`, `--add` and `--remove` address
+  the fields of the existing template.
+- `--name <new name>` renames the container: the old container and its template are removed and a
+  new one is created (same as the WebUI). If the old container was stopped, the new one is created
+  but not started. Autostart is **not** carried over by the WebUI; add `--autostart` to keep it.
+- `--template-only` only rewrites the template and leaves the container alone – for when the running
+  container is already right and only the template needs fixing. The next update or *Apply* uses
+  the new template. Cannot be combined with a rename.
+- Without changes nothing is done (the template is compared as dockerMan reads it, so a newer XML
+  layout alone is no change). Loading and saving can still normalise a few things exactly like the
+  WebUI does (e.g. square brackets in the overview, device fields); `--dry-run` lists them under
+  `changes`.
+- Before anything is changed, the generated command is checked with `/bin/sh -n`. dockerMan passes
+  *Extra Parameters* and *Post Arguments* unquoted to the shell, so a raw ``--label key=Host(`…`)`` there
+  would make the next update remove the container and fail to create it again. Such commands are
+  refused with `INVALID_COMMAND` (also by `install`); put labels into Label fields
+  (`--add Label:KEY=VALUE`) instead.
+- Containers without a template (e.g. created with `docker run` or compose) cannot be edited:
+  `NO_TEMPLATE`.
+
+## Options for `options`, `install` and `edit`
 
 These cover everything the WebUI *Add Container* form can do, except the Tailscale section
 (see [issue #1](https://github.com/tommibembel/appctl-for-unraid/issues/1)).
@@ -77,7 +118,9 @@ These cover everything the WebUI *Add Container* form can do, except the Tailsca
 | `--container KEY=VALUE` | Any other container field (repeatable): `Repository`, `Registry`, `Shell` (`sh`/`bash`), `Privileged` (`true`/`false`), `WebUI`, `Icon`, `ExtraParams`, `PostArgs`, `CPUset` (e.g. `2,3`), `Category`, `Overview`, `Requires`, `Support`, `Project`, `TemplateURL`, `DonateText`, `DonateLink`, `ReadMe`. Unraid **7.2.5+**: `MyMAC` (fixed MAC address, custom networks and bridge). Unraid **7.4+**: `Memory` (e.g. `512m`, `2g`), `ExtraNetworks` (additional custom networks, comma separated; connected after the start). On older versions these fail with `UNSUPPORTED`, like the field is missing in the WebUI. `Name`, `Network`, `MyIP` are aliases of the options above. |
 | `--autostart` | Enable autostart (the toggle on the Docker page). |
 | `--autostart-wait <sec>` | Autostart wait period (implies `--autostart`). |
-| `--replace` | Allow replacing an existing container and/or `my-<name>.xml` with the same name. Without it, a name in use is an error. |
+| `--replace` | Allow replacing an existing container and/or `my-<name>.xml` with the same name. Without it, a name in use is an error. With `edit` only needed when renaming onto a name that is in use. |
+| `--edit` | `options` only: show the *Edit* form of the existing container `<container>` instead of a CA app. |
+| `--template-only` | `edit` only: write the template, do not recreate the container. |
 
 ### Template fields (ports, paths, variables, labels, devices)
 
@@ -179,6 +222,13 @@ command), `replaces` (what `--replace` will replace), `autostart`, `dry_run`, `i
 real install also `container_id` and `steps` (e.g. `pulled …`, `wrote …`, `started container`,
 `autostart enabled`).
 
+### `edit` data
+
+Like `install` data, plus `old_name`, `changes` (list of `{field, change: added|removed|changed, old,
+new}`; template fields also have `type`, `target` and `props` – which properties changed; values of
+secret fields are shown as `****`), `unchanged` (nothing to do), `template_only`, and `applied`
+instead of `installed`. `options --edit` also returns `mode: "edit"`, `changes` and `unchanged`.
+
 ### `search` / `info` data
 
 `search`: `{ "total": 7, "results": [ { "id", "name", "author", "repository", "repo", "deprecated", "compatible", "overview" } ] }`.
@@ -191,13 +241,13 @@ and `config` (raw template fields).
 |---|---|---|
 | 0 | ok (`options` also returns 0 when `ready` is false) | – |
 | 1 | internal error | `INTERNAL`, `TEMPLATE_PATH` |
-| 2 | usage / invalid input | `USAGE`, `INVALID_NAME`, `INVALID_NETWORK`, `INVALID_VALUE`, `UNKNOWN_FIELD` |
-| 3 | app not found | `NOT_FOUND` |
+| 2 | usage / invalid input | `USAGE`, `INVALID_NAME`, `INVALID_NETWORK`, `INVALID_VALUE`, `UNKNOWN_FIELD`, `INVALID_COMMAND` (generated command is not valid shell syntax, see [`edit`](#changing-an-existing-container-edit)) |
+| 3 | app / container not found | `NOT_FOUND`, `NO_TEMPLATE` (container exists but has no template, cannot be edited) |
 | 4 | ambiguous | `AMBIGUOUS` (app, with `candidates`), `AMBIGUOUS_FIELD` (field, with `fields`) |
 | 5 | required field without value | `MISSING_REQUIRED` (with `missing`) |
 | 6 | name in use | `NAME_CONFLICT` (with `conflicts`) |
 | 7 | environment / version | `CA_NOT_INSTALLED`, `FEED_DOWNLOAD_FAILED` (no internet / DNS), `FEED_INVALID`, `DOCKERMAN_CHANGED` (a dockerMan function the tool calls is missing), `DOCKER_NOT_RUNNING` |
-| 8 | install failed | `CREATEXML_FAILED`, `UNSUPPORTED`, `PULL_FAILED`, `WRITE_FAILED`, `RUN_FAILED`, `AUTOSTART_FAILED` |
+| 8 | install / apply failed | `CREATEXML_FAILED`, `UNSUPPORTED`, `PULL_FAILED`, `WRITE_FAILED`, `RUN_FAILED`, `AUTOSTART_FAILED` |
 | 9 | confirmation required | `CONFIRMATION_REQUIRED` |
 | 10 | host port in use | `PORT_CONFLICT` (with `conflicts`, each with `suggested_port`) |
 
@@ -267,6 +317,13 @@ Add a read-only path and a label, change a field's display:
 ```
 appctl install <app> --add Path:/media=/mnt/user/media --set /media.mode=ro \
     --add Label:com.example.backup=true --set 8080.display=advanced --dry-run
+```
+
+Change an existing container: publish another port, rename it, or only fix its template:
+```
+appctl edit example-app --set 8080=8081 --dry-run
+appctl edit example-app --name example-app-old --autostart --yes
+appctl edit example-app --remove EXAMPLE_API_TOKEN --template-only --yes
 ```
 
 Agent-style JSON:

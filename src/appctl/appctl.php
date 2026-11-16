@@ -74,14 +74,19 @@ Usage:
                                                    (missing values, port conflicts) -> ask the user, re-run
   appctl install <app> [options] --dry-run      show resulting template + docker command, change nothing
   appctl install <app> [options] --yes          really install
+  appctl options --edit <container> [options] [--json]
+                                               the Edit form of an existing container, incl. pending changes
+  appctl edit <container> [options] --dry-run   show changes, resulting template + docker command
+  appctl edit <container> [options] --yes       Edit -> Apply: rewrite template, recreate container
+             [--template-only]                 only rewrite the template, leave the container untouched
   appctl update-feed [--json]                    download / refresh the CA app feed (done automatically when missing)
   appctl version [--json]
 
 <app> is an exact app name, an app ID from `search`, or an exact repository (e.g. ghcr.io/example/app:latest).
 
-Options for `options` and `install` (cover everything the WebUI "Add Container" form can do,
-except Tailscale):
-  --name <name>              container name (default: template name)
+Options for `options`, `install` and `edit` (cover everything the WebUI "Add Container" / Edit form
+can do, except Tailscale):
+  --name <name>              container name (default: template name; edit: renames the container)
   --network <net>            bridge | host | none | container:<name> | <custom network, e.g. br0>
   --ip <address>             fixed IP (custom networks only)
   --container KEY=VALUE      any container field: Repository, Registry, Network, MyIP, Shell (sh|bash),
@@ -101,6 +106,7 @@ except Tailscale):
   --autostart                enable autostart after install (Docker page toggle)
   --autostart-wait <sec>     autostart wait period
   --replace                  allow replacing an existing container/template with the same name
+                             (edit: only needed when renaming onto another container's name)
   --json                     machine-readable output
 
 Order of field operations: --remove, then --add, then --set.
@@ -111,6 +117,7 @@ Documentation: https://github.com/tommibembel/appctl-for-unraid
 Exit codes: 0 ok, 2 usage, 3 not found, 4 ambiguous, 5 required field missing,
             6 name conflict, 7 environment/version problem, 8 install failed,
             9 confirmation required (use --dry-run or --yes), 10 host port in use,
+            2 also for INVALID_COMMAND (generated command is not valid shell syntax),
             1 internal error
 
 TXT;
@@ -120,7 +127,7 @@ $GLOBALS['APPCTL_VERSION_STR'] = APPCTL_VERSION;
 function parseArgs(array $argv): array {
   $o = ['cmd' => null, 'args' => [], 'json' => false, 'limit' => 20, 'name' => null, 'set' => [],
         'container' => [], 'add' => [], 'remove' => [], 'network' => null, 'ip' => null,
-        'replace' => false, 'dry' => false, 'yes' => false,
+        'replace' => false, 'dry' => false, 'yes' => false, 'edit' => false, 'templateOnly' => false,
         'autostart' => false, 'autostartWait' => null];
   $valueOpts = ['--limit' => 'limit', '--name' => 'name', '--network' => 'network', '--ip' => 'ip',
                 '--autostart-wait' => 'autostartWait'];
@@ -136,6 +143,8 @@ function parseArgs(array $argv): array {
       case '--dry-run': $o['dry'] = true; break;
       case '--yes': case '-y': $o['yes'] = true; break;
       case '--replace': $o['replace'] = true; break;
+      case '--edit': $o['edit'] = true; break;
+      case '--template-only': $o['templateOnly'] = true; break;
       case '--autostart': $o['autostart'] = true; break;
       case '--help': case '-h': $o['cmd'] = 'help'; break;
       default:
@@ -440,12 +449,17 @@ function loadTemplateLikeDockerMan(string $xmlPath, string $finalName): array {
         'Mode' => 'rw', 'Description' => '', 'Type' => 'Path', 'Display' => 'hidden', 'Required' => 'false', 'Mask' => 'false'];
     }
   }
+  finishTemplateLoad($xml);
+  return $xml;
+}
+
+/** REPLICATED: CreateDocker.php "LOAD TEMPLATE" steps done for every template type (overview handling). */
+function finishTemplateLoad(array &$xml): void {
   $xml['Overview'] = str_replace(['[', ']'], ['<', '>'], $xml['Overview']);
   $xml['Description'] = $xml['Overview'] = strip_tags(str_replace("<br>", "\n", $xml['Overview']));
   if (($xml['TailscaleEnabled'] ?? '') === 'true') {
     throw new AppctlError('UNSUPPORTED', 'Templates with Tailscale enabled are not supported yet', EXIT_INSTALL_FAIL);
   }
-  return $xml;
 }
 
 /**
@@ -868,15 +882,96 @@ function userTemplatePath(string $name): string {
   return "{$dockerManPaths['templates-user']}/my-$name.xml";
 }
 
-function nameConflicts(string $name): array {
-  global $DockerClient, $dockerManPaths;
+/** Containers/templates already using $name. `edit`: the container being edited ($self, $selfTemplate) does not count. */
+function nameConflicts(string $name, ?string $self = null, ?string $selfTemplate = null): array {
+  global $DockerClient;
   $found = [];
   foreach ($DockerClient->getDockerContainers() as $ct) {
+    if ($ct['Name'] === $self) continue;
     if (strcasecmp($ct['Name'], $name) === 0) $found[] = "container '{$ct['Name']}'";
   }
   $tmpl = userTemplatePath($name);
-  if (is_file($tmpl)) $found[] = "template $tmpl";
+  if (is_file($tmpl) && $tmpl !== $selfTemplate) $found[] = "template $tmpl";
   return $found;
+}
+
+/**
+ * dockerMan runs the command with popen() -> /bin/sh. Extra Parameters and Post Arguments are inserted
+ * unquoted, so e.g. a raw "--label key=Host(`x`)" breaks the command: WebUI Apply/Update would remove the
+ * old container and then fail to create the new one. Check the syntax before anything is changed.
+ * Returns an error message or null.
+ */
+function shellSyntaxError(string $cmd): ?string {
+  exec('/bin/sh -n -c '.escapeshellarg($cmd).' 2>&1', $out, $rc);
+  if ($rc === 0) return null;
+  // only the first message line: the shell echoes the whole command next, which may contain secrets
+  return trim(preg_replace('/^.*?line \d+:\s*/', '', $out[0] ?? '')) ?: "sh -n exit $rc";
+}
+
+/** Warnings for Extra Parameters / Post Arguments that the shell interprets (unquoted in the command). */
+function warnShellSpecial(array $post): void {
+  foreach (['contExtraParams' => 'ExtraParams', 'contPostArgs' => 'PostArgs'] as $k => $f) {
+    if (preg_match('/[`$()<>;&|]/', (string)($post[$k] ?? ''))) {
+      warn("$f contains shell special characters; dockerMan passes it unquoted to /bin/sh. Labels and variables belong in Label/Variable fields (--add Label:KEY=VALUE).");
+    }
+  }
+}
+
+/** postToXML() + xmlToCommand() without side effects, plus the shell syntax check. */
+function buildCommand(array $post): array {
+  $postXML = postToXML($post, true);                          // ORIGINAL "Apply"
+  [$cmd, $Name, $Repository] = xmlToCommand($postXML, false); // ORIGINAL, no host paths created
+  return [$postXML, $cmd, $Name, $Repository, shellSyntaxError($cmd)];
+}
+
+function throwShellSyntax(string $err, string $cmd): void {
+  throw new AppctlError('INVALID_COMMAND', "The generated docker command is not valid shell syntax ($err). dockerMan passes ".
+    'Extra Parameters and Post Arguments unquoted to /bin/sh. Fix them with --container ExtraParams=... / PostArgs=..., '.
+    'and put labels/variables into fields (--add Label:KEY=VALUE, --add Variable:KEY=VALUE).', EXIT_USAGE);
+}
+
+/**
+ * What changes between two templates (xmlToVar() arrays): container fields and template fields.
+ * Fields are matched by Type + Target (Device: Value). Values of masked fields are not shown.
+ */
+function settingsDiff(array $a, array $b): array {
+  $changes = [];
+  foreach (array_unique(array_merge(array_keys($a), array_keys($b))) as $k) {
+    if (in_array($k, ['Config', 'DateInstalled'], true)) continue;
+    $va = $a[$k] ?? ''; $vb = $b[$k] ?? '';
+    if (is_array($va)) $va = implode(',', $va);
+    if (is_array($vb)) $vb = implode(',', $vb);
+    if ((string)$va !== (string)$vb) $changes[] = ['field' => $k, 'change' => 'changed', 'old' => (string)$va, 'new' => (string)$vb];
+  }
+  $index = function (array $configs): array {
+    $out = [];
+    foreach ($configs as $c) {
+      $key = ($c['Type'] ?? '').':'.(($c['Type'] ?? '') === 'Device' ? ($c['Value'] ?? '') : ($c['Target'] ?? ''));
+      $k = $key; for ($n = 2; isset($out[$k]); $n++) $k = "$key#$n";
+      $out[$k] = $c;
+    }
+    return $out;
+  };
+  $ca = $index($a['Config'] ?? []); $cb = $index($b['Config'] ?? []);
+  $show = fn($c) => ($c['Mask'] ?? '') === 'true' && ($c['Value'] ?? '') !== '' ? '****' : (string)($c['Value'] ?? '');
+  foreach (array_unique(array_merge(array_keys($ca), array_keys($cb))) as $k) {
+    $x = $ca[$k] ?? null; $y = $cb[$k] ?? null;
+    $c = $y ?? $x;
+    $entry = ['field' => (string)($c['Name'] ?? ''), 'type' => (string)($c['Type'] ?? ''), 'target' => (string)($c['Target'] ?? '')];
+    if (!$x) { $changes[] = $entry + ['change' => 'added', 'old' => null, 'new' => $show($y)]; continue; }
+    if (!$y) { $changes[] = $entry + ['change' => 'removed', 'old' => $show($x), 'new' => null]; continue; }
+    $props = [];
+    foreach (['Name', 'Target', 'Default', 'Mode', 'Description', 'Display', 'Required', 'Mask', 'Value'] as $p) {
+      if ((string)($x[$p] ?? '') !== (string)($y[$p] ?? '')) $props[] = strtolower($p);
+    }
+    if ($props) {
+      $secret = (($x['Mask'] ?? '') === 'true') || (($y['Mask'] ?? '') === 'true');
+      $changes[] = $entry + ['change' => 'changed', 'props' => $props,
+        'old' => $secret ? ($x['Value'] !== $y['Value'] ? '****' : $show($x)) : (string)($x['Value'] ?? ''),
+        'new' => $secret ? ($x['Value'] !== $y['Value'] ? '**** (changed)' : $show($y)) : (string)($y['Value'] ?? '')];
+    }
+  }
+  return $changes;
 }
 
 /**
@@ -884,6 +979,7 @@ function nameConflicts(string $name): array {
  * and collects problems instead of failing on them. Usage errors (bad --set/--network) still throw.
  */
 function prepare(array $o): array {
+  if ($o['edit']) return prepareEdit($o);
   if (count($o['args']) !== 1) throw new AppctlError('USAGE', "{$o['cmd']} needs exactly one app", EXIT_USAGE);
   checkEnvironment();
   $t = resolveApp(loadFeed(), $o['args'][0]);
@@ -891,18 +987,77 @@ function prepare(array $o): array {
   if (isset($t['Compatible']) && empty($t['Compatible'])) warn("App '{$t['Name']}' is marked as incompatible with this Unraid version");
 
   loadDockerMan();
-  $name = $o['name'] ?? str_replace(' ', '-', $t['Name']);   // createXML: str_replace(" ","-",Name)
-  $name = preg_replace('/\s+/', '', $name);
-  if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.\-]+$/', $name)) {   // pattern of input[name=contName]
-    throw new AppctlError('INVALID_NAME', "Invalid container name '$name' (allowed: letters, digits, _ . -)", EXIT_USAGE);
-  }
+  $name = checkName($o['name'] ?? str_replace(' ', '-', $t['Name']));   // createXML: str_replace(" ","-",Name)
   $xmlPath = runCreateXML($t);                                // 1. ORIGINAL CA createXML()
   $xml = loadTemplateLikeDockerMan($xmlPath, $name);          // 2. dockerMan form load
   applyUserInput($xml, $o);
   [$post, $missing, $meta] = formPost($xml);
-  return ['template' => $t, 'name' => $name, 'xml' => $xml, 'post' => $post, 'meta' => $meta, 'missing' => $missing,
+  return ['template' => $t, 'app' => summary($t), 'name' => $name, 'xml' => $xml, 'post' => $post, 'meta' => $meta, 'missing' => $missing,
           'name_conflicts' => nameConflicts($name),
           'port_conflicts' => portConflicts($post, $name)];   // not in WebUI: a human sees conflicts, an agent doesn't
+}
+
+/** Container name as the form's contName input accepts it. */
+function checkName(string $name): string {
+  $name = preg_replace('/\s+/', '', $name);
+  if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.\-]+$/', $name)) {   // pattern of input[name=contName]
+    throw new AppctlError('INVALID_NAME', "Invalid container name '$name' (allowed: letters, digits, _ . -)", EXIT_USAGE);
+  }
+  return $name;
+}
+
+/**
+ * `edit` / `options --edit`: the Docker page's Edit form for an existing container.
+ * REPLICATED: CreateDocker.php "LOAD TEMPLATE" with xmlType=edit (7.4: lines 332-390): xmlToVar() of the
+ * user template, container: network split, overview handling – no /config and /unraid overrides.
+ * Hidden inputs: existingContainer if the container exists, sourceTemplate (7.4, lines 979-984).
+ */
+function prepareEdit(array $o): array {
+  global $DockerTemplates, $DockerClient, $dockerManPaths;
+  if (count($o['args']) !== 1) throw new AppctlError('USAGE', 'edit needs exactly one container name', EXIT_USAGE);
+  loadDockerMan();
+  $old = $o['args'][0];
+  $tmpl = $DockerTemplates->getUserTemplate($old);              // ORIGINAL (Docker page: Edit link)
+  if (!$tmpl) {
+    if ($DockerClient->doesContainerExist($old)) {
+      throw new AppctlError('NO_TEMPLATE', "Container '$old' has no template (it was not created with the Docker page or Community Applications) – it cannot be edited like in the WebUI", EXIT_NOT_FOUND);
+    }
+    throw new AppctlError('NOT_FOUND', "No container or template named '$old'", EXIT_NOT_FOUND);
+  }
+  $xml = xmlToVar($tmpl);                                       // ORIGINAL
+  finishTemplateLoad($xml);
+  $oldName = $xml['Name'];
+  $exists = $DockerClient->doesContainerExist($oldName);
+  if (!$exists) warn("No container '$oldName' exists, only its template – applying creates the container (same as WebUI)");
+  $name = checkName($o['name'] ?? $oldName);
+  $xml['Name'] = $name;
+  applyUserInput($xml, $o);
+  [$post, $missing, $meta] = formPost($xml);
+  if ($exists) $post['existingContainer'] = $oldName;           // <input type="hidden" name="existingContainer">
+  // Where Apply writes the template (7.4: sourceTemplate = the edited file if it is a user template; 7.1: my-<name>.xml)
+  $hasSource = method_exists($DockerTemplates, 'getUserTemplatePath') && dirname($tmpl) === $dockerManPaths['templates-user']
+               && preg_match('/^my-[^\/\\\\]+\.xml$/', basename($tmpl));
+  $existing = $exists ? $oldName : null;
+  $filename = ($hasSource && $existing === $name) ? $tmpl : userTemplatePath($name);
+  $oldFilename = $hasSource ? $tmpl : userTemplatePath($oldName);
+  $renamed = $name !== $oldName;
+  if ($renamed && $o['templateOnly']) throw new AppctlError('USAGE', '--template-only cannot rename a container', EXIT_USAGE);
+  return ['template' => null, 'name' => $name, 'xml' => $xml, 'post' => $post, 'meta' => $meta, 'missing' => $missing,
+          'app' => ['name' => $oldName, 'repository' => $xml['Repository'], 'template_url' => $xml['TemplateURL'] ?? '',
+                    'template_file' => $tmpl, 'container_exists' => $exists],
+          'edit' => ['old_name' => $oldName, 'existing' => $existing, 'renamed' => $renamed, 'source_template' => $tmpl,
+                     'filename' => $filename, 'old_filename' => $oldFilename],
+          'name_conflicts' => $renamed ? nameConflicts($name, $oldName, $tmpl) : [],
+          'port_conflicts' => portConflicts($post, $oldName)];
+}
+
+/** `edit`: old template vs. the one Apply would write. Returns [unchanged, changes]. */
+function editChanges(array $ctx, string $postXML): array {
+  // Compared as dockerMan reads them (xmlToVar), not byte by byte: the XML serialisation differs between
+  // Unraid releases (e.g. &#xD; vs &#13;, empty elements for newer form fields) without changing anything.
+  $changes = settingsDiff(xmlToVar($ctx['edit']['source_template']), xmlToVar($postXML));
+  $same = !$changes && !$ctx['edit']['renamed'] && $ctx['edit']['filename'] === $ctx['edit']['source_template'];
+  return [$same, $changes];
 }
 
 /** `options`: the "Add Container" form as data, so an agent can ask the user what to change. */
@@ -915,6 +1070,12 @@ function cmdOptions(array $o): array {
     $problems[] = ['code' => 'NAME_CONFLICT', 'field' => '--name',
                    'message' => "Name '{$ctx['name']}' already in use: ".implode(', ', $ctx['name_conflicts'])];
   }
+  [$postXML, $cmd, , , $shErr] = buildCommand($post);
+  if ($shErr !== null) {
+    $problems[] = ['code' => 'INVALID_COMMAND', 'field' => '--container ExtraParams|PostArgs',
+                   'message' => "generated docker command is not valid shell syntax ($shErr) – fix ExtraParams/PostArgs, put labels into Label fields"];
+  }
+  warnShellSpecial($post);
   $fields = [];
   foreach ($post['confType'] ?? [] as $i => $type) {
     $m = $ctx['meta'][$i];
@@ -952,16 +1113,21 @@ function cmdOptions(array $o): array {
     $networks[] = ['name' => $net, 'driver' => $driver[$net] ?? '', 'subnet' => $sn,
                    'fixed_ip_possible' => !in_array($net, ['bridge', 'host', 'none'], true)];
   }
-  $t = $ctx['template'];
+  $extra = [];
+  if ($o['edit']) {
+    [$same, $changes] = editChanges($ctx, $postXML);
+    $extra = ['changes' => $changes, 'unchanged' => $same];
+  }
   return [
-    'app'        => summary($t),
+    'mode'       => $o['edit'] ? 'edit' : 'install',
+    'app'        => $ctx['app'],
     'ready'      => !$problems,
     'problems'   => $problems,
     'container'  => [
       'name'       => $ctx['name'],
       'network'    => ($post['contNetwork'] ?? '') === 'container' ? 'container:'.($post['netCONT'] ?? '') : ($post['contNetwork'] ?? ''),
       'fixed_ip'   => $post['contMyIP'] ?? '',
-      'autostart'  => $o['autostart'],
+      'autostart'  => $o['autostart'] || ($o['edit'] && autostartEnabled($ctx['edit']['old_name'])),
       'autostart_wait' => $o['autostartWait'],
     ],
     // every other container field, settable with --container KEY=VALUE
@@ -977,17 +1143,22 @@ function cmdOptions(array $o): array {
     'requires'   => trim(strip_tags(str_replace(['[', ']'], ['<', '>'], $ctx['xml']['Requires'] ?? ''))),
     'overview'   => shortText($ctx['xml']['Overview'] ?? '', 2000),
     'support'    => $post['contSupport'],
+  ] + $extra + [
     'how_to_change' => 'Re-run with --name, --network, --ip, --container KEY=VALUE, --set <set_key>=<value>, --set <set_key>.<prop>=<value>, '.
-                       '--add TYPE:TARGET=VALUE, --remove <set_key>, --autostart until ready=true; then: install <same arguments> --dry-run, and finally --yes.',
+                       '--add TYPE:TARGET=VALUE, --remove <set_key>, --autostart until ready=true; then: '.
+                       ($o['edit'] ? 'edit <container> <same arguments> --dry-run' : 'install <same arguments> --dry-run').', and finally --yes.',
   ];
 }
 
-function cmdInstall(array $o): array {
+function checkConfirm(array $o, string $what): void {
   if ($o['dry'] && $o['yes']) throw new AppctlError('USAGE', 'Use either --dry-run or --yes', EXIT_USAGE);
   if (!$o['dry'] && !$o['yes']) {
-    throw new AppctlError('CONFIRMATION_REQUIRED', 'Nothing done. Preview with --dry-run, then install with --yes.', EXIT_CONFIRM);
+    throw new AppctlError('CONFIRMATION_REQUIRED', "Nothing done. Preview with --dry-run, then $what with --yes.", EXIT_CONFIRM);
   }
-  $ctx = prepare($o);
+}
+
+/** Errors shared by install and edit (same order as the checks a human would notice). */
+function checkReady(array $ctx, array $o): void {
   $name = $ctx['name'];
   if ($ctx['name_conflicts'] && !$o['replace']) {
     throw new AppctlError('NAME_CONFLICT', "Name '$name' already in use: ".implode(', ', $ctx['name_conflicts']).'. Use --name or --replace.',
@@ -1005,12 +1176,64 @@ function cmdInstall(array $o): array {
       '. Choose free ports with --set <target>=<port> or use a custom network like br0.',
       EXIT_PORT_CONFLICT, ['conflicts' => $c]);
   }
-  $postXML = postToXML($ctx['post'], true);                   // 3. ORIGINAL "Apply"
-  [$cmd, $Name, $Repository] = xmlToCommand($postXML, false);
+}
+
+function autostartEnabled(string $name): bool {
+  global $dockerManPaths;
+  $names = array_map(fn($l) => explode(' ', $l)[0], (array)@file($dockerManPaths['autostart-file'], FILE_IGNORE_NEW_LINES));
+  return in_array($name, $names, true);
+}
+
+/** `edit`: Edit -> Apply on the Docker page for an existing container. */
+function cmdEdit(array $o): array {
+  checkConfirm($o, 'apply');
+  $ctx = prepareEdit($o);
+  $e = $ctx['edit'];
+  checkReady($ctx, $o);
+  [$postXML, $cmd, $Name, $Repository, $shErr] = buildCommand($ctx['post']);
+  if ($shErr !== null) throwShellSyntax($shErr, $cmd);
+  warnShellSpecial($ctx['post']);
+  [$same, $changes] = editChanges($ctx, $postXML);
+  $renamedAutostart = $e['renamed'] && autostartEnabled($e['old_name']);
+  if ($renamedAutostart && !$o['autostart']) {
+    warn("Autostart is enabled for '{$e['old_name']}'; the WebUI does not carry it over to '$Name' – add --autostart to keep it");
+  }
+  $start = !($e['existing'] && $e['renamed'] && !containerRunning($e['existing']));
+  $runCmd = $start ? str_replace('/docker create ', '/docker run -d ', $cmd) : $cmd;
+  $result = ['app' => $ctx['app'], 'name' => $Name, 'old_name' => $e['old_name'], 'repository' => $Repository,
+             'template_file' => $e['filename'], 'xml' => $postXML, 'command' => $runCmd,
+             'changes' => $changes, 'unchanged' => $same, 'template_only' => $o['templateOnly'],
+             'replaces' => $ctx['name_conflicts'], 'autostart' => $o['autostart'] || (!$e['renamed'] && autostartEnabled($Name)),
+             'autostart_wait' => $o['autostartWait']];
+  if ($o['dry']) return $result + ['dry_run' => true, 'applied' => false];
+  if ($same && !$o['autostart']) return $result + ['dry_run' => false, 'applied' => false, 'steps' => ['no changes – nothing done']];
+  $res = $result + ['dry_run' => false, 'applied' => true, 'steps' => []];
+  if (!$same) {
+    $r = doInstall($postXML, $Name, $Repository, $e['filename'], $o['replace'], $ctx['post'], $e['existing'], $e['old_filename'], $o['templateOnly']);
+    $res['steps'] = $r['steps'];
+    if (isset($r['container_id'])) $res['container_id'] = $r['container_id'];
+  }
+  if ($o['autostart']) $res['steps'][] = setAutostart($Name, $o['autostartWait']);
+  return $res;
+}
+
+function containerRunning(string $name): bool {
+  global $DockerClient;
+  $info = $DockerClient->getContainerDetails($name);
+  return !empty($info['State']['Running']);
+}
+
+function cmdInstall(array $o): array {
+  checkConfirm($o, 'install');
+  $ctx = prepare($o);
+  checkReady($ctx, $o);
+  [$postXML, $cmd, $Name, $Repository, $shErr] = buildCommand($ctx['post']);   // 3. ORIGINAL "Apply"
+  if ($shErr !== null) throwShellSyntax($shErr, $cmd);
+  warnShellSpecial($ctx['post']);
   $runCmd = str_replace('/docker create ', '/docker run -d ', $cmd);
   $filename = userTemplatePath($Name);
 
-  $result = ['app' => summary($ctx['template']), 'name' => $Name, 'repository' => $Repository, 'template_file' => $filename,
+  $result = ['app' => $ctx['app'], 'name' => $Name, 'repository' => $Repository, 'template_file' => $filename,
              'xml' => $postXML, 'command' => $runCmd, 'replaces' => $ctx['name_conflicts'],
              'autostart' => $o['autostart'], 'autostart_wait' => $o['autostartWait']];
   if ($o['dry']) return $result + ['dry_run' => true, 'installed' => false];
@@ -1043,19 +1266,79 @@ function setAutostart(string $name, ?string $wait): string {
 }
 
 /**
- * REPLICATED: CreateDocker.php lines 71-160 (Apply, not dry run), using the ORIGINAL helpers.
- * Deviation: the image is pulled BEFORE the template is written, so a failed pull leaves nothing behind.
+ * REPLICATED: CreateDocker.php Apply (7.4: lines 129-235, not dry run), using the ORIGINAL helpers.
+ * $existing = hidden input existingContainer (edit: name of the container being edited, if it exists).
+ * Deviations: the image is pulled BEFORE the template is written, so a failed pull leaves nothing behind;
+ * an existing container with the new name is only replaced when $replace (the WebUI replaces it silently).
+ * $templateOnly: only write the template (no pull, container untouched).
  */
-function doInstall(string $postXML, string $Name, string $Repository, string $filename, bool $replace, array $post = []): array {
+function doInstall(string $postXML, string $Name, string $Repository, string $filename, bool $replace, array $post = [],
+                   ?string $existing = null, ?string $oldFilename = null, bool $templateOnly = false): array {
   global $DockerClient, $DockerTemplates, $dockerManPaths, $docroot;
   $steps = [];
-  if (!$DockerClient->doesImageExist($Repository)) {
+  if (!$templateOnly && !$DockerClient->doesImageExist($Repository)) {
     if (!pullImage($Name, $Repository, false)) {
       throw new AppctlError('PULL_FAILED', "Pulling image $Repository failed", EXIT_INSTALL_FAIL);
     }
     $steps[] = "pulled $Repository";
   }
+  if ($templateOnly) {
+    writeTemplate($postXML, $Name, $Repository, $filename);
+    return ['dry_run' => false, 'installed' => false, 'steps' => ["wrote $filename (container not changed)"]];
+  }
   [$cmd] = xmlToCommand($postXML, true);   // second call creates the host paths (as WebUI)
+  writeTemplate($postXML, $Name, $Repository, $filename);
+  $steps[] = "wrote $filename";
+  $DockerClient->flushCaches();
+  if ($DockerClient->doesContainerExist($Name)) {
+    if ($Name !== $existing && !$replace) throw new AppctlError('NAME_CONFLICT', "Container '$Name' appeared meanwhile", EXIT_CONFLICT);
+    if (containerRunning($Name)) { stopContainer($Name, false, false); $steps[] = "stopped old $Name"; }
+    removeContainer($Name, false, false);
+    $steps[] = "removed old $Name";
+  }
+  $start = true;
+  // renamed: remove the container with the old name and its template (stopped before -> new one is not started)
+  if ($existing && $existing !== $Name && $DockerClient->doesContainerExist($existing)) {
+    if (containerRunning($existing)) { stopContainer($existing, false, false); $steps[] = "stopped $existing"; }
+    else $start = false;
+    removeContainer($existing, 1, false);
+    $steps[] = "removed $existing";
+    if ($oldFilename && strtolower($filename) != strtolower($oldFilename) && is_file($oldFilename)) {
+      @unlink($oldFilename);
+      $steps[] = "removed old template $oldFilename";
+    }
+  }
+  // A stale Docker page cache entry for this name (e.g. left by a container that was renamed
+  // outside dockerMan) would keep its old update status/links forever. DockerClient::removeContainer()
+  // drops this entry when the WebUI replaces a container; do the same when there is no container.
+  dropStaleWebuiInfo($Name);
+  if ($start) $cmd = str_replace('/docker create ', '/docker run -d ', $cmd);
+  // execCommand() (Helpers.php) with echo=false would discard the output; same popen, but output kept.
+  $proc = popen("$cmd 2>&1", 'r');
+  $output = '';
+  while (($line = fgets($proc)) !== false) $output .= $line;
+  $rc = pclose($proc);
+  if ($rc !== 0) {
+    throw new AppctlError('RUN_FAILED', "docker ".($start ? 'run' : 'create')." failed (exit $rc): ".trim($output), EXIT_INSTALL_FAIL,
+      ['output' => trim($output), 'template_file' => $filename, 'steps' => $steps,
+       'hint' => 'The template was saved (same as WebUI). Fix the cause and re-run (install: with --replace), or edit it in the WebUI.']);
+  }
+  $steps[] = $start ? 'started container' : 'created container (not started: the old one was stopped)';
+  // Unraid 7.4: additional networks are attached after creation (CreateDocker.php, after execCommand)
+  if (function_exists('connectExtraNetworks') && !empty($post['contExtraNetworks'])) {
+    if (!connectExtraNetworks($Name, $post['contExtraNetworks'], $post['contNetwork'] ?? '', false)) {
+      warn('Container created, but connecting the additional networks failed – check them on the Docker page');
+    } else {
+      $steps[] = 'connected additional networks: '.implode(', ', (array)$post['contExtraNetworks']);
+    }
+  }
+  if ($start) addRoute($Name);
+  return ['dry_run' => false, 'installed' => true, 'container_id' => trim($output), 'steps' => $steps];
+}
+
+/** Template write incl. icon cache cleanup when the icon changed (CreateDocker.php Apply). */
+function writeTemplate(string $postXML, string $Name, string $Repository, string $filename): void {
+  global $DockerTemplates, $dockerManPaths, $docroot;
   $userTmplDir = $dockerManPaths['templates-user'];
   if (!is_dir($userTmplDir)) mkdir($userTmplDir, 0777, true);
   if (is_file($filename)) {
@@ -1071,45 +1354,22 @@ function doInstall(string $postXML, string $Name, string $Repository, string $fi
   if (file_put_contents($filename, $postXML) === false) {
     throw new AppctlError('WRITE_FAILED', "Could not write $filename", EXIT_INSTALL_FAIL);
   }
-  $steps[] = "wrote $filename";
-  if ($DockerClient->doesContainerExist($Name)) {
-    if (!$replace) throw new AppctlError('NAME_CONFLICT', "Container '$Name' appeared during install", EXIT_CONFLICT);
-    $old = $DockerClient->getContainerDetails($Name);
-    if (!empty($old['State']['Running'])) { stopContainer($Name, false, false); $steps[] = "stopped old $Name"; }
-    removeContainer($Name, false, false);
-    $steps[] = "removed old $Name";
-  }
-  // A stale Docker page cache entry for this name (e.g. left by a container that was renamed
-  // outside dockerMan) would keep its old update status/links forever. DockerClient::removeContainer()
-  // drops this entry when the WebUI replaces a container; do the same when there is no container.
-  dropStaleWebuiInfo($Name);
-  $cmd = str_replace('/docker create ', '/docker run -d ', $cmd);
-  // execCommand() (Helpers.php line 619) with echo=false would discard the output; same popen, but output kept.
-  $proc = popen("$cmd 2>&1", 'r');
-  $output = '';
-  while (($line = fgets($proc)) !== false) $output .= $line;
-  $rc = pclose($proc);
-  if ($rc !== 0) {
-    throw new AppctlError('RUN_FAILED', "docker run failed (exit $rc): ".trim($output), EXIT_INSTALL_FAIL,
-      ['output' => trim($output), 'template_file' => $filename,
-       'hint' => 'The template was saved (same as WebUI). Fix the cause and re-run with --replace, or edit it in the WebUI.']);
-  }
-  $steps[] = 'started container';
-  addRoute($Name);
-  // Unraid 7.4: additional networks are attached after creation (CreateDocker.php, after execCommand)
-  if (function_exists('connectExtraNetworks') && !empty($post['contExtraNetworks'])) {
-    if (!connectExtraNetworks($Name, $post['contExtraNetworks'], $post['contNetwork'] ?? '', false)) {
-      warn('Container started, but connecting the additional networks failed – check them on the Docker page');
-    } else {
-      $steps[] = 'connected additional networks: '.implode(', ', (array)$post['contExtraNetworks']);
-    }
-  }
-  return ['dry_run' => false, 'installed' => true, 'container_id' => trim($output), 'steps' => $steps];
 }
 
 #################################################################
 # Output
 #################################################################
+
+function printChanges(array $changes, bool $unchanged): void {
+  if ($unchanged) { echo "\nNo changes (template would be identical).\n"; return; }
+  echo "\nChanges:\n";
+  if (!$changes) echo "  (no setting changes – template file name changes)\n";
+  foreach ($changes as $c) {
+    $label = isset($c['type']) ? "{$c['type']} {$c['field']}".($c['target'] !== '' ? " ({$c['target']})" : '') : $c['field'];
+    $props = isset($c['props']) && $c['props'] !== ['value'] ? '  ['.implode(', ', $c['props']).']' : '';
+    printf("  %-8s %s: %s -> %s%s\n", $c['change'], $label, $c['old'] ?? '-', $c['new'] ?? '-', $props);
+  }
+}
 
 function printHuman(string $cmd, array $d): void {
   switch ($cmd) {
@@ -1130,6 +1390,7 @@ function printHuman(string $cmd, array $d): void {
       echo "\n{$d['note']}\n";
       break;
     case 'options':
+      if ($d['mode'] === 'edit') echo "EDIT {$d['app']['name']}  (template {$d['app']['template_file']})\n";
       printf("%s  (%s)\nContainer name: %s\nNetwork:        %s%s   [available: %s]\nWebUI:          %s\n",
         $d['app']['name'], $d['app']['repository'], $d['container']['name'], $d['container']['network'],
         $d['container']['fixed_ip'] !== '' ? " ip {$d['container']['fixed_ip']}" : '',
@@ -1157,7 +1418,9 @@ function printHuman(string $cmd, array $d): void {
         }
       }
       foreach ($d['problems'] as $p) if ($p['code'] === 'NAME_CONFLICT') echo "\n!! {$p['message']} -> use --name\n";
-      echo $d['ready'] ? "\nREADY – next: install ... --dry-run, then --yes\n" : "\nNOT READY – ".count($d['problems'])." problem(s), see !! above\n";
+      foreach ($d['problems'] as $p) if ($p['code'] === 'INVALID_COMMAND') echo "\n!! {$p['message']}\n";
+      if (isset($d['changes'])) printChanges($d['changes'], $d['unchanged']);
+      echo $d['ready'] ? "\nREADY – next: ".($d['mode'] === 'edit' ? 'edit' : 'install')." ... --dry-run, then --yes\n" : "\nNOT READY – ".count($d['problems'])." problem(s), see !! above\n";
       break;
     case 'install':
       echo $d['dry_run'] ? "DRY RUN – nothing was changed.\n\n" : "Installed.\n\n";
@@ -1166,6 +1429,16 @@ function printHuman(string $cmd, array $d): void {
       echo 'Autostart: '.($d['autostart'] ? 'on' : 'off')."\n";
       echo "\n--- XML ---\n{$d['xml']}\n--- COMMAND ---\n{$d['command']}\n";
       if (!$d['dry_run']) echo "\n".implode("\n", $d['steps'])."\nContainer ID: {$d['container_id']}\n";
+      break;
+    case 'edit':
+      echo $d['dry_run'] ? "DRY RUN – nothing was changed.\n\n" : ($d['applied'] ? "Applied.\n\n" : "Nothing done.\n\n");
+      if ($d['name'] !== $d['old_name']) echo "Rename: {$d['old_name']} -> {$d['name']}\n";
+      if ($d['replaces']) echo "Replaces: ".implode(', ', $d['replaces'])."\n";
+      echo "Template file: {$d['template_file']}".($d['template_only'] ? '  (template only, container untouched)' : '')."\n";
+      echo 'Autostart: '.($d['autostart'] ? 'on' : 'off')."\n";
+      printChanges($d['changes'], $d['unchanged']);
+      if ($d['dry_run']) echo "\n--- XML ---\n{$d['xml']}\n--- COMMAND ---\n{$d['command']}\n";
+      if (!$d['dry_run']) echo "\n".implode("\n", $d['steps'])."\n";
       break;
     case 'update-feed':
       echo "CA app feed updated ({$d['updated']})\n";
@@ -1188,6 +1461,7 @@ function main(array $argv): int {
       case 'info':    checkEnvironment(); $data = cmdInfo($o); break;
       case 'options': $data = cmdOptions($o); break;
       case 'install': $data = cmdInstall($o); break;
+      case 'edit':    $data = cmdEdit($o); break;
       case 'update-feed': checkEnvironment(); $data = updateFeed(); break;
       case 'version': $data = ['appctl' => APPCTL_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()]; break;
       default: throw new AppctlError('USAGE', "Unknown command '$cmd' (see appctl --help)", EXIT_USAGE);

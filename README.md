@@ -36,6 +36,8 @@ like a click in the WebUI. Details: [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 ## Features
 
 - `search`, `info`, `options`, `install --dry-run`, `install --yes`, `update-feed`
+- **`edit`**: change an existing container like *Edit → Apply* on the Docker page (labels, ports,
+  paths, rename, …), with a list of changes before anything happens and `--template-only`
 - Works right after a reboot: the Community Applications app feed is downloaded automatically
   (no need to open the *Apps* tab)
 - **`options`** returns the whole form as data – every setting already adapted to the server, with
@@ -45,7 +47,8 @@ like a click in the WebUI. Details: [DEVELOPMENT.md](docs/DEVELOPMENT.md).
   field properties (*Edit*), add/remove fields, autostart
 - `--json` output with stable error codes and exit codes
 - Safe by default: nothing is installed without `--yes`; ambiguous apps, name conflicts, missing
-  required values and host port conflicts stop before anything is changed
+  required values, host port conflicts and broken *Extra Parameters* (shell syntax check) stop
+  before anything is changed
 
 ## Documentation
 
