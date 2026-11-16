@@ -1,6 +1,7 @@
 ###2026.11.16c
 - New command `edit`: change an existing container like Edit -> Apply on the Docker page (same options as install, rename, --template-only); `options --edit` shows the form and the pending changes
 - Shell syntax check of the generated docker command before install/edit (raw labels in Extra Parameters would break the next update)
+- Fix: port conflict check ignored the port bindings of existing containers (container IDs were passed to docker inspect as one argument)
 
 ###2026.11.16
 - First plugin release

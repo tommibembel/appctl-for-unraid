@@ -790,10 +790,10 @@ function formPost(array $xml): array {
 function hostPortsInUse(string $exclude): array {
   $used = $excluded = [];
   // configured bindings of all containers (docker inspect works for stopped ones, too)
-  $ids = trim((string)shell_exec('docker ps -aq 2>/dev/null'));
-  if ($ids !== '') {
+  $ids = preg_split('/\s+/', trim((string)shell_exec('docker ps -aq 2>/dev/null')), -1, PREG_SPLIT_NO_EMPTY);
+  if ($ids) {
     $fmt = '{{.Name}}|{{.State.Running}}|{{json .HostConfig.PortBindings}}';
-    foreach (explode("\n", trim((string)shell_exec("docker inspect --format '$fmt' ".str_replace("\n", ' ', escapeshellcmd($ids)).' 2>/dev/null'))) as $line) {
+    foreach (explode("\n", trim((string)shell_exec("docker inspect --format '$fmt' ".implode(' ', array_map('escapeshellarg', $ids)).' 2>/dev/null'))) as $line) {
       [$cname, $running, $bind] = array_pad(explode('|', $line, 3), 3, '');
       $cname = ltrim($cname, '/');
       foreach ((array)json_decode($bind, true) as $cport => $hosts) {
