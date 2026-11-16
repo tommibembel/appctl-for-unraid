@@ -74,7 +74,7 @@ These cover everything the WebUI *Add Container* form can do, except the Tailsca
 | `--name <name>` | Container name. Default: template name (spaces → `-`). Allowed: letters, digits, `_ . -`. |
 | `--network <net>` | `bridge`, `host`, `none`, `container:<other container>` or a custom network (e.g. `br0`). `options` lists the available ones. |
 | `--ip <address>` | Fixed IP; only for custom networks (e.g. `br0`). |
-| `--container KEY=VALUE` | Any other container field (repeatable): `Repository`, `Registry`, `Shell` (`sh`/`bash`), `Privileged` (`true`/`false`), `WebUI`, `Icon`, `ExtraParams`, `PostArgs`, `CPUset` (e.g. `2,3`), `Category`, `Overview`, `Requires`, `Support`, `Project`, `TemplateURL`, `DonateText`, `DonateLink`. `Name`, `Network`, `MyIP` are aliases of the options above. |
+| `--container KEY=VALUE` | Any other container field (repeatable): `Repository`, `Registry`, `Shell` (`sh`/`bash`), `Privileged` (`true`/`false`), `WebUI`, `Icon`, `ExtraParams`, `PostArgs`, `CPUset` (e.g. `2,3`), `Category`, `Overview`, `Requires`, `Support`, `Project`, `TemplateURL`, `DonateText`, `DonateLink`, `ReadMe`. Unraid **7.2.5+**: `MyMAC` (fixed MAC address, custom networks and bridge). Unraid **7.4+**: `Memory` (e.g. `512m`, `2g`), `ExtraNetworks` (additional custom networks, comma separated; connected after the start). On older versions these fail with `UNSUPPORTED`, like the field is missing in the WebUI. `Name`, `Network`, `MyIP` are aliases of the options above. |
 | `--autostart` | Enable autostart (the toggle on the Docker page). |
 | `--autostart-wait <sec>` | Autostart wait period (implies `--autostart`). |
 | `--replace` | Allow replacing an existing container and/or `my-<name>.xml` with the same name. Without it, a name in use is an error. |
@@ -215,6 +215,7 @@ Error details: `UNKNOWN_FIELD` lists all `fields` (or `available` container fiel
   `br0` (macvlan/ipvlan) the container has its own IP and the port fields are only passed as
   `TCP_PORT_<n>` variables.
 - `--replace` stops and removes an existing container with that name, then creates the new one.
+- A fixed MAC address is dropped on `host`, `none` and `container:` networks (the WebUI hides and clears the field there).
 
 **Different from the WebUI (on purpose):**
 - *Appdata path follows the container name.* In the WebUI the `/config` appdata path keeps the

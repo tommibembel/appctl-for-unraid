@@ -87,7 +87,8 @@ except Tailscale):
   --container KEY=VALUE      any container field: Repository, Registry, Network, MyIP, Shell (sh|bash),
                              Privileged (true|false), WebUI, Icon, ExtraParams, PostArgs, CPUset,
                              Category, Overview, Requires, Support, Project, TemplateURL,
-                             DonateText, DonateLink. Repeatable.
+                             DonateText, DonateLink, ReadMe. Unraid 7.2.5+: MyMAC. Unraid 7.4+: Memory
+                             (e.g. 512m, 2g), ExtraNetworks (comma separated). Repeatable.
   --set KEY=VALUE            value of a template field. KEY = field Target (e.g. PUID, 80, /config)
                              or field Name. Repeatable.
   --set KEY.PROP=VALUE       change a field property like the WebUI "Edit" button. PROP = name,
@@ -476,7 +477,27 @@ function setKeyFor(array $configs, int $i): ?string {
 
 /** Container fields settable with --container (form fields cont<KEY>). Name/Network/MyIP via --name/--network/--ip. */
 const APPCTL_CONTAINER_FIELDS = ['Repository', 'Registry', 'Shell', 'Privileged', 'WebUI', 'Icon', 'ExtraParams', 'PostArgs',
-  'CPUset', 'Category', 'Overview', 'Requires', 'Support', 'Project', 'TemplateURL', 'DonateText', 'DonateLink'];
+  'CPUset', 'Category', 'Overview', 'Requires', 'Support', 'Project', 'TemplateURL', 'DonateText', 'DonateLink', 'ReadMe'];
+
+/**
+ * Form fields that only newer Unraid versions have. Detected by the dockerMan functions that came
+ * with them, so the same appctl works on 7.1.x (fields simply not offered) and on 7.4.
+ *   MyMAC          "Fixed MAC address"     (7.2.5+, normalizeMacAddress())
+ *   Memory         "Memory limit"          (7.4.0,  connectExtraNetworks() came in the same release)
+ *   ExtraNetworks  "Additional Networks"   (7.4.0,  connectExtraNetworks())
+ */
+function newerFormFields(): array {
+  $f = [];
+  if (function_exists('normalizeMacAddress')) $f[] = 'MyMAC';
+  if (function_exists('connectExtraNetworks')) { $f[] = 'Memory'; $f[] = 'ExtraNetworks'; }
+  return $f;
+}
+
+/** Options of <select id="contExtraNetworks"> (CreateDocker.php 7.4): custom networks except host/none/bridge/container. */
+function extraNetworkOptions(): array {
+  global $custom;
+  return array_values(array_filter($custom, fn($n) => !in_array($n, ['host', 'none', 'bridge', 'container'], true)));
+}
 
 /** Field properties editable with --set KEY.PROP=VALUE (WebUI "Edit" dialog), with allowed values. */
 function fieldPropRules(string $type): array {
@@ -533,10 +554,30 @@ function applyUserInput(array &$xml, array $o): void {
   // Container fields
   foreach ($o['container'] as [$key, $value]) {
     $field = null;
-    foreach (APPCTL_CONTAINER_FIELDS as $f) if (strcasecmp($f, $key) === 0) $field = $f;
+    $known = array_merge(APPCTL_CONTAINER_FIELDS, newerFormFields());
+    foreach ($known as $f) if (strcasecmp($f, $key) === 0) $field = $f;
     if ($field === null) {
+      $newer = ['MyMAC' => '7.2.5', 'Memory' => '7.4.0', 'ExtraNetworks' => '7.4.0'];
+      foreach ($newer as $f => $v) if (strcasecmp($f, $key) === 0) {
+        throw new AppctlError('UNSUPPORTED', "--container $f needs Unraid $v or newer (the WebUI form of this version has no such field)", EXIT_USAGE);
+      }
       throw new AppctlError('UNKNOWN_FIELD', "--container $key: unknown container field", EXIT_USAGE,
-        ['available' => array_merge(APPCTL_CONTAINER_FIELDS, ['Name', 'Network', 'MyIP'])]);
+        ['available' => array_merge($known, ['Name', 'Network', 'MyIP'])]);
+    }
+    if ($field === 'MyMAC' && $value !== '' && !preg_match('/^(([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}|[0-9A-Fa-f]{12})$/', $value)) {
+      throw new AppctlError('INVALID_VALUE', '--container MyMAC: MAC address like 02:42:c0:a8:01:20', EXIT_USAGE);   // input pattern
+    }
+    if ($field === 'Memory' && $value !== '' && !preg_match('/^[0-9]+[bkmgBKMG]?$/', $value)) {
+      throw new AppctlError('INVALID_VALUE', '--container Memory: bytes or a number with b, k, m or g (e.g. 512m, 2g)', EXIT_USAGE);   // input pattern
+    }
+    if ($field === 'ExtraNetworks') {
+      $nets = preg_split('/[\s,]+/', trim($value), -1, PREG_SPLIT_NO_EMPTY);
+      $bad = array_diff($nets, extraNetworkOptions());
+      if ($bad) {
+        throw new AppctlError('INVALID_NETWORK', '--container ExtraNetworks: unknown or not allowed: '.implode(', ', $bad), EXIT_USAGE,
+          ['available' => extraNetworkOptions()]);
+      }
+      $value = implode(',', $nets);
     }
     if ($field === 'Shell' && !in_array($value, ['sh', 'bash'], true)) throw new AppctlError('INVALID_VALUE', '--container Shell: sh or bash', EXIT_USAGE);
     if ($field === 'Privileged') {
@@ -652,6 +693,21 @@ function formPost(array $xml): array {
   }
   // showSubnet(): fixed IP is cleared for bridge/host/none; netCONT select ends up without selection
   if (preg_match('/^(bridge|host|none|container)$/i', $post['contNetwork'] ?? '')) $post['contMyIP'] = '';
+  // Unraid 7.2.5+/7.4 form fields (only posted if this Unraid's form has them)
+  $newer = newerFormFields();
+  if (in_array('MyMAC', $newer, true)) {
+    // showSubnet() (7.4): MAC field hidden and cleared for host/none/container; prepareConfig(): '-' -> ':', lower case
+    $mac = textInput($xml['MyMAC'] ?? '');
+    if (preg_match('/^(host|none|container)$/i', $post['contNetwork'] ?? '')) $mac = '';
+    $post['contMyMAC'] = strtolower(str_replace('-', ':', trim($mac)));
+  }
+  if (in_array('Memory', $newer, true)) $post['contMemory'] = textInput($xml['Memory'] ?? '');
+  if (in_array('ExtraNetworks', $newer, true)) {
+    // <select multiple name="contExtraNetworks[]">: options preselected from the template (PHP), only existing networks
+    $sel = preg_split('/[\s,]+/', trim($xml['ExtraNetworks'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+    $sel = array_values(array_intersect(extraNetworkOptions(), $sel));
+    if ($sel) $post['contExtraNetworks'] = $sel;
+  }
   // <select name="contShell">: only sh|bash exist; any other value -> nothing selected -> not posted
   if (in_array($xml['Shell'], ['sh', 'bash'], true)) $post['contShell'] = $xml['Shell'];
   // checkbox
@@ -805,13 +861,20 @@ function dropStaleWebuiInfo(string $name): bool {
   return true;
 }
 
+/** Template file for a container: Unraid 7.4's getUserTemplatePath() (case-insensitive match), else my-<name>.xml. */
+function userTemplatePath(string $name): string {
+  global $DockerTemplates, $dockerManPaths;
+  if (method_exists($DockerTemplates, 'getUserTemplatePath')) return $DockerTemplates->getUserTemplatePath($name);
+  return "{$dockerManPaths['templates-user']}/my-$name.xml";
+}
+
 function nameConflicts(string $name): array {
   global $DockerClient, $dockerManPaths;
   $found = [];
   foreach ($DockerClient->getDockerContainers() as $ct) {
     if (strcasecmp($ct['Name'], $name) === 0) $found[] = "container '{$ct['Name']}'";
   }
-  $tmpl = "{$dockerManPaths['templates-user']}/my-$name.xml";   // /boot is FAT -> case-insensitive
+  $tmpl = userTemplatePath($name);
   if (is_file($tmpl)) $found[] = "template $tmpl";
   return $found;
 }
@@ -902,11 +965,13 @@ function cmdOptions(array $o): array {
       'autostart_wait' => $o['autostartWait'],
     ],
     // every other container field, settable with --container KEY=VALUE
-    'container_fields' => array_combine(APPCTL_CONTAINER_FIELDS, array_map(fn($f) => match ($f) {
-      'Privileged' => ($post['contPrivileged'] ?? '') === 'on' ? 'true' : 'false',
-      'Shell'      => $post['contShell'] ?? '',
-      default      => $post["cont$f"] ?? '',
-    }, APPCTL_CONTAINER_FIELDS)),
+    'container_fields' => array_combine($cf = array_merge(APPCTL_CONTAINER_FIELDS, newerFormFields()), array_map(fn($f) => match ($f) {
+      'Privileged'    => ($post['contPrivileged'] ?? '') === 'on' ? 'true' : 'false',
+      'Shell'         => $post['contShell'] ?? '',
+      'ExtraNetworks' => implode(',', (array)($post['contExtraNetworks'] ?? [])),
+      default         => $post["cont$f"] ?? '',
+    }, $cf)),
+    'extra_network_options' => in_array('ExtraNetworks', newerFormFields(), true) ? extraNetworkOptions() : null,
     'networks'   => $networks,
     'fields'     => $fields,
     'requires'   => trim(strip_tags(str_replace(['[', ']'], ['<', '>'], $ctx['xml']['Requires'] ?? ''))),
@@ -943,14 +1008,14 @@ function cmdInstall(array $o): array {
   $postXML = postToXML($ctx['post'], true);                   // 3. ORIGINAL "Apply"
   [$cmd, $Name, $Repository] = xmlToCommand($postXML, false);
   $runCmd = str_replace('/docker create ', '/docker run -d ', $cmd);
-  $filename = sprintf('%s/my-%s.xml', $GLOBALS['dockerManPaths']['templates-user'], $Name);
+  $filename = userTemplatePath($Name);
 
   $result = ['app' => summary($ctx['template']), 'name' => $Name, 'repository' => $Repository, 'template_file' => $filename,
              'xml' => $postXML, 'command' => $runCmd, 'replaces' => $ctx['name_conflicts'],
              'autostart' => $o['autostart'], 'autostart_wait' => $o['autostartWait']];
   if ($o['dry']) return $result + ['dry_run' => true, 'installed' => false];
 
-  $res = $result + doInstall($postXML, $Name, $Repository, $filename, $o['replace']);
+  $res = $result + doInstall($postXML, $Name, $Repository, $filename, $o['replace'], $ctx['post']);
   if ($o['autostart']) $res['steps'][] = setAutostart($Name, $o['autostartWait']);
   return $res;
 }
@@ -981,7 +1046,7 @@ function setAutostart(string $name, ?string $wait): string {
  * REPLICATED: CreateDocker.php lines 71-160 (Apply, not dry run), using the ORIGINAL helpers.
  * Deviation: the image is pulled BEFORE the template is written, so a failed pull leaves nothing behind.
  */
-function doInstall(string $postXML, string $Name, string $Repository, string $filename, bool $replace): array {
+function doInstall(string $postXML, string $Name, string $Repository, string $filename, bool $replace, array $post = []): array {
   global $DockerClient, $DockerTemplates, $dockerManPaths, $docroot;
   $steps = [];
   if (!$DockerClient->doesImageExist($Repository)) {
@@ -1031,6 +1096,14 @@ function doInstall(string $postXML, string $Name, string $Repository, string $fi
   }
   $steps[] = 'started container';
   addRoute($Name);
+  // Unraid 7.4: additional networks are attached after creation (CreateDocker.php, after execCommand)
+  if (function_exists('connectExtraNetworks') && !empty($post['contExtraNetworks'])) {
+    if (!connectExtraNetworks($Name, $post['contExtraNetworks'], $post['contNetwork'] ?? '', false)) {
+      warn('Container started, but connecting the additional networks failed – check them on the Docker page');
+    } else {
+      $steps[] = 'connected additional networks: '.implode(', ', (array)$post['contExtraNetworks']);
+    }
+  }
   return ['dry_run' => false, 'installed' => true, 'container_id' => trim($output), 'steps' => $steps];
 }
 

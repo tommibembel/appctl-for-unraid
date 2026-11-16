@@ -5,4 +5,5 @@
 - Install via original CA createXML() and dockerMan postToXML()/xmlToCommand()
 - Covers the whole "Add Container" form except Tailscale (--container, --set, --set KEY.prop, --add, --remove, --autostart)
 - Host port conflict check with suggested free ports
-- Tested on Unraid 7.1.2 with Community Applications 2026.07.21
+- Unraid 7.4 support: MAC address (7.2.5+), memory limit and additional networks (7.4); additional networks are connected after the start like the WebUI
+- Tested on Unraid 7.1.2, 7.1.4 and 7.4.0 with Community Applications 2026.07.21

@@ -73,9 +73,9 @@ Requires Unraid 7.x with the Community Applications plugin. See [INSTALL.md](doc
 
 ## Limitations
 
-- **Tested with Unraid 7.1.2 and Community Applications 2026.07.21.** It uses internal,
-  non-public Unraid and CA functions, which can change with any update. Other versions are not
-  checked or blocked – using them is up to you. Preview with `--dry-run` first.
+- **Tested with Unraid 7.1.2, 7.1.4 and 7.4.0** and Community Applications 2026.07.21. It uses
+  internal, non-public Unraid and CA functions, which can change with any update. Other versions
+  are not checked or blocked – using them is up to you. Preview with `--dry-run` first.
 - The dockerMan form runs in the browser; that part is replicated in PHP and is the piece most
   likely to need an update after an Unraid release.
 - No Tailscale integration yet ([issue #1](https://github.com/tommibembel/appctl-for-unraid/issues/1)).

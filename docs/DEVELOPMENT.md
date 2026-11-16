@@ -84,7 +84,23 @@ that POST → `runCreateXML()`.
 - dockerMan's own dry run (`dryRun=true`) **saves the template too**, so it is not used;
   `--dry-run` only calls `postToXML()` and `xmlToCommand($xml, false)`.
 
-### 4. Extras that are not part of the Apply flow
+### 4. Differences between Unraid versions
+
+The same code supports 7.1.x and 7.4. Newer form fields are detected by the dockerMan functions
+that came with them (`newerFormFields()`), not by version numbers:
+
+| Field | Since | Detected by | Notes |
+|---|---|---|---|
+| `contMyMAC` "Fixed MAC address" | 7.2.5 | `normalizeMacAddress()` | `showSubnet()` clears it on host/none/container; `prepareConfig()` lowercases and turns `-` into `:` |
+| `contMemory` "Memory limit" | 7.4.0 | `connectExtraNetworks()` | input pattern `[0-9]+[bkmgBKMG]?` |
+| `contExtraNetworks[]` "Additional Networks" | 7.4.0 | `connectExtraNetworks()` | multi-select of custom networks except host/none/bridge/container; after `docker run` the Apply flow calls `connectExtraNetworks()` |
+| `contReadMe` | 7.4.0 | – | was already in the form, now saved by `postToXML()` |
+
+Also new in 7.4: `DockerTemplates::getUserTemplatePath()` (case-insensitive template file lookup),
+used when present (`userTemplatePath()`). `postToXML()` writes the new elements itself, so a default
+install produces the same template on both versions.
+
+### 5. Extras that are not part of the Apply flow
 
 - CA app feed: lives in RAM (`/tmp/community.applications/tempFiles/templates_new.json`) and is gone
   after every reboot. When it is missing, `loadFeed()` calls CA's **original** `force_update()`
