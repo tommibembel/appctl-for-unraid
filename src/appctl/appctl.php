@@ -1158,9 +1158,13 @@ function cmdOptions(array $o): array {
     'overview'   => shortText($ctx['xml']['Overview'] ?? '', 2000),
     'support'    => $post['contSupport'],
   ] + $extra + [
-    'how_to_change' => 'Re-run with --name, --network, --ip, --container KEY=VALUE, --set <set_key>=<value>, --set <set_key>.<prop>=<value>, '.
-                       '--add TYPE:TARGET=VALUE, --remove <set_key>, --autostart until ready=true; then: '.
-                       ($o['edit'] ? 'edit <container> <same arguments> --dry-run' : 'install <same arguments> --dry-run').', and finally --yes.',
+    'how_to_change' => !empty($GLOBALS['APPCTL_MCP'])
+      ? 'Call options again with name, network, ip, container_fields {KEY: VALUE}, set {"<set_key>": value, "<set_key>.<prop>": value}, '.
+        'add [{type, target, value}], remove [<set_key>], autostart until ready=true; then '.($o['edit'] ? 'edit' : 'install').
+        ' with the same arguments and dry_run=true, and after the user confirmed, dry_run=false.'
+      : 'Re-run with --name, --network, --ip, --container KEY=VALUE, --set <set_key>=<value>, --set <set_key>.<prop>=<value>, '.
+        '--add TYPE:TARGET=VALUE, --remove <set_key>, --autostart until ready=true; then: '.
+        ($o['edit'] ? 'edit <container> <same arguments> --dry-run' : 'install <same arguments> --dry-run').', and finally --yes.',
   ];
 }
 
@@ -1401,8 +1405,12 @@ function mcpTools(): array {
                                                      'additionalProperties' => false] + ($required ? ['required' => $required] : []);
   $str = fn(string $d) => ['type' => 'string', 'description' => $d];
   $bool = fn(string $d) => ['type' => 'boolean', 'description' => $d];
-  $form = [
-    'name'    => $str('Container name (install: default is the template name; edit: renames the container).'),
+  $form = fn(string $tool) => [
+    'name'    => $str(match ($tool) {
+      'install' => 'Container name (default: the template name).',
+      'edit'    => 'New container name: renames the container (old container and template are removed).',
+      default   => 'Container name: with app the name to install as (default: template name); with container a rename.',
+    }),
     'network' => $str('bridge | host | none | container:<name> | a custom network such as br0 (see data.networks of options).'),
     'ip'      => $str('Fixed IP, only for custom networks like br0.'),
     'container_fields' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'],
@@ -1416,13 +1424,15 @@ function mcpTools(): array {
     'remove' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'set_keys of fields to remove.'],
     'autostart' => $bool('Enable autostart (Docker page toggle).'),
     'autostart_wait' => ['type' => 'integer', 'minimum' => 0, 'description' => 'Autostart wait period in seconds (implies autostart).'],
-    'replace' => $bool('Allow replacing an existing container/template with the same name. Only on the user\'s explicit request: it stops and removes that container.'),
-  ];
+  ] + ($tool === 'options'
+    ? ['replace' => $bool('Same value you will pass to install/edit; with true a name conflict is not reported as a problem.')]
+    : ['replace' => $bool('Allow replacing an existing container/template with the same name'.($tool === 'edit' ? ' (only relevant when renaming)' : '').
+                          '. Only on the user\'s explicit request: it stops and removes that container.')]);
   $ro = ['readOnlyHint' => true, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => true];
   $rw = ['readOnlyHint' => false, 'destructiveHint' => true, 'idempotentHint' => false, 'openWorldHint' => true];
   return [
     ['name' => 'search', 'title' => 'Search Community Applications',
-     'description' => 'Search the CA app feed by name, author, repository and description. Returns name, repository, author, ID per app. Use the exact name (or repository) as "app" in the other tools.',
+     'description' => 'Search the CA app feed by name, author, repository and description. Returns name, repository, author, ID per app. Use the exact name (or, if two apps share it, the exact repository) as "app" in the other tools. IDs change whenever the feed is downloaded again (e.g. after a reboot) – use them only right away.',
      'inputSchema' => $obj(['term' => $str('Search term.'), 'limit' => ['type' => 'integer', 'minimum' => 1, 'description' => 'Max results (default 20).']], ['term']),
      'annotations' => $ro],
     ['name' => 'info', 'title' => 'Raw CA template',
@@ -1432,16 +1442,16 @@ function mcpTools(): array {
     ['name' => 'options', 'title' => 'Show settings',
      'description' => 'The Add Container form (with "app") or the Edit form of an existing container (with "container") as data: every setting adapted to this server, problems (missing values, port conflicts with suggestions, name conflicts) and ready=true/false; for containers also the pending "changes". Repeat with the user\'s answers until ready is true. Changes nothing.',
      'inputSchema' => $obj(['app' => $str('Exact app name, exact repository, or an app ID (install).'),
-                            'container' => $str('Name of an existing container (edit).')] + $form),
+                            'container' => $str('Name of an existing container (edit).')] + $form('options')),
      'annotations' => $ro],
     ['name' => 'install', 'title' => 'Install an app',
      'description' => 'Install a CA app like Install -> Apply in the WebUI. dry_run=true (default) only shows the resulting template and docker command. dry_run=false pulls the image, writes the template and starts the container – only after the user explicitly confirmed the dry run.',
-     'inputSchema' => $obj(['app' => $str('Exact app name, exact repository, or an app ID from search.')] + $form +
+     'inputSchema' => $obj(['app' => $str('Exact app name, exact repository, or an app ID from search.')] + $form('install') +
                            ['dry_run' => $bool('true (default): preview only. false: really install.')], ['app']),
      'annotations' => $rw],
     ['name' => 'edit', 'title' => 'Edit a container',
      'description' => 'Change an existing container like Edit -> Apply on the Docker page. dry_run=true (default) shows the changes, the new template and command. dry_run=false writes the template and recreates the container (short downtime) – only after the user explicitly confirmed the dry run. Renaming (name) removes the old container and template; autostart is not carried over unless autostart=true.',
-     'inputSchema' => $obj(['container' => $str('Name of the existing container.')] + $form +
+     'inputSchema' => $obj(['container' => $str('Name of the existing container.')] + $form('edit') +
                            ['template_only' => $bool('Only rewrite the template, leave the container untouched.'),
                             'dry_run' => $bool('true (default): preview only. false: really apply.')], ['container']),
      'annotations' => $rw],
@@ -1524,6 +1534,7 @@ function mcpToOptions(string $tool, array $a): array {
 function mcpCallTool(string $tool, array $args): array {
   global $APPCTL_WARNINGS;
   $APPCTL_WARNINGS = [];
+  $GLOBALS['APPCTL_MCP'] = true;
   $cmd = ['update_feed' => 'update-feed'][$tool] ?? $tool;
   ob_start();
   try {

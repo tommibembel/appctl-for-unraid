@@ -212,6 +212,7 @@ Field attributes:
 | `secret` | Password-type field (*Mask*). The value is included in JSON; never echo it to a user or log. |
 | `advanced` | Shown under *Show more settings* in the WebUI – usually fine to keep. |
 | `hidden` | Not shown in the WebUI at all. |
+| `description` | Field description, cleaned for display (HTML tags removed, whitespace and line breaks collapsed); the template keeps the original. |
 | `problems` | `MISSING_REQUIRED` or `PORT_CONFLICT` (with `suggested_value`). |
 
 Top-level `problems` additionally contains `NAME_CONFLICT` (unless `--replace` is given).
@@ -260,8 +261,9 @@ Error details: `UNKNOWN_FIELD` lists all `fields` (or `available` container fiel
 **Same as the WebUI (on purpose):**
 - *Empty value → default.* dockerMan uses a field's default when its value is empty. You cannot
   "empty" a field that has a default; use `--remove KEY` instead. `appctl` warns about this.
-- Template quirks are reproduced byte for byte, e.g. `Mode="{3}"` on variables without a mode
-  and CRLF line breaks in the description – so the result is identical to a WebUI install.
+- Template quirks are reproduced byte for byte, e.g. `Mode="{3}"` on variables without a mode,
+  CRLF line breaks in the description, or `&amp;amp;` for a `&` in the overview (dockerMan escapes it
+  twice) – so the result is identical to a WebUI install.
 - On `bridge`/`host` networks port fields are published host ports; on custom networks like
   `br0` (macvlan/ipvlan) the container has its own IP and the port fields are only passed as
   `TCP_PORT_<n>` variables.
