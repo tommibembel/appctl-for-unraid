@@ -74,6 +74,7 @@ Usage:
                                                    (missing values, port conflicts) -> ask the user, re-run
   appctl install <app> [options] --dry-run      show resulting template + docker command, change nothing
   appctl install <app> [options] --yes          really install
+  appctl update-feed [--json]                    download / refresh the CA app feed (done automatically when missing)
   appctl version [--json]
 
 <app> is an exact app name, an app ID from `search`, or an exact repository (e.g. ghcr.io/example/app:latest).
@@ -197,11 +198,40 @@ function checkEnvironment(): void {
 #################################################################
 
 /** Same reading logic as CA readJsonFile() (helpers.php ~line 130): serialized PHP, fallback JSON. */
+/**
+ * CA writes its debug log to /tmp/CA_logs; the Apps page creates that folder (Apps.page line 37).
+ * Without it CA's debug() recurses until PHP runs out of memory – after every reboot, before the
+ * Apps tab was opened. So create it before calling any CA code.
+ */
+function prepareCA(): void {
+  @mkdir('/tmp/CA_logs', 0755, true);
+}
+
+/**
+ * Download / refresh the CA app feed with CA's ORIGINAL force_update() – the same action the Apps
+ * tab runs when it is opened (exec.php force_update -> DownloadApplicationFeed()). The feed lives in
+ * RAM (/tmp), so it is gone after every reboot.
+ */
+function updateFeed(): array {
+  prepareCA();
+  $out = webuiAction('plugins/community.applications/include/exec.php', ['action' => 'force_update']);
+  $res = null;
+  for ($p = strpos($out, '{'); $p !== false; $p = strpos($out, '{', $p + 1)) {
+    $res = json_decode(substr($out, $p), true);
+    if (is_array($res)) break;
+  }
+  if (!is_file(APPCTL_FEED_CACHE)) {
+    $why = trim(preg_replace('/\s+/', ' ', strip_tags(str_replace('<br>', ' ', $res['data'] ?? ''))));
+    throw new AppctlError('FEED_DOWNLOAD_FAILED', 'Downloading the CA app feed failed'.($why ? ": $why" : ' (no internet access / DNS?)'),
+      EXIT_ENVIRONMENT);
+  }
+  return ['feed' => APPCTL_FEED_CACHE, 'updated' => date('c', filemtime(APPCTL_FEED_CACHE))];
+}
+
 function loadFeed(): array {
   if (!is_file(APPCTL_FEED_CACHE)) {
-    throw new AppctlError('FEED_MISSING',
-      'CA app feed cache not found ('.APPCTL_FEED_CACHE.'). Open the "Apps" tab in the WebUI once to download it.',
-      EXIT_ENVIRONMENT);
+    updateFeed();   // e.g. after a reboot – no need to open the Apps tab
+    warn('CA app feed was not loaded (e.g. after a reboot) and has been downloaded');
   }
   $raw = file_get_contents(APPCTL_FEED_CACHE);
   $feed = @unserialize($raw, ['allowed_classes' => false]);
@@ -343,6 +373,7 @@ function webuiAction(string $script, array $post): string {
 
 /** Step 1: original CA createXML() in a sub-process. Returns path of the adapted template XML. */
 function runCreateXML(array $t): string {
+  prepareCA();
   $path = $t['Path'] ?? '';
   if (!$path || str_starts_with($path, '/boot/')) {
     throw new AppctlError('TEMPLATE_PATH', 'Template has no usable feed path', EXIT_INTERNAL);
@@ -1063,11 +1094,11 @@ function printHuman(string $cmd, array $d): void {
       echo "\n--- XML ---\n{$d['xml']}\n--- COMMAND ---\n{$d['command']}\n";
       if (!$d['dry_run']) echo "\n".implode("\n", $d['steps'])."\nContainer ID: {$d['container_id']}\n";
       break;
+    case 'update-feed':
+      echo "CA app feed updated ({$d['updated']})\n";
+      break;
     case 'version':
-      printf("appctl %s
-Unraid %s
-Community Applications %s
-", $d['ca_install'], $d['unraid'], $d['community_applications']);
+      printf("appctl %s\nUnraid %s\nCommunity Applications %s\n", $d['appctl'], $d['unraid'], $d['community_applications']);
       break;
   }
 }
@@ -1084,7 +1115,8 @@ function main(array $argv): int {
       case 'info':    checkEnvironment(); $data = cmdInfo($o); break;
       case 'options': $data = cmdOptions($o); break;
       case 'install': $data = cmdInstall($o); break;
-      case 'version': $data = ['ca_install' => APPCTL_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()]; break;
+      case 'update-feed': checkEnvironment(); $data = updateFeed(); break;
+      case 'version': $data = ['appctl' => APPCTL_VERSION, 'unraid' => unraidVersion(), 'community_applications' => caVersion()]; break;
       default: throw new AppctlError('USAGE', "Unknown command '$cmd' (see appctl --help)", EXIT_USAGE);
     }
     if ($json) {

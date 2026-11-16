@@ -30,7 +30,8 @@ Always read `warnings` and pass relevant ones on to the user.
    installed (`install … --dry-run`), wait for a clear "yes", then run the identical command
    with `--yes` instead of `--dry-run`.
 2. **Never guess.** If `<app>` is ambiguous, show the candidates (name, repository, author, ID)
-   and let the user choose. Use the **ID** from then on.
+   and let the user choose. Use the **ID** from then on – within this task only: IDs change when the
+   CA feed is downloaded again (e.g. after a reboot). The exact repository is stable.
 3. **Ask, don't invent.** Values the user has to decide (passwords, domains, host paths for
    their data, ports when there is a conflict) come from the user. Defaults that `options`
    already filled in may be kept – say that you keep them.

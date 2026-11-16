@@ -86,6 +86,14 @@ that POST → `runCreateXML()`.
 
 ### 4. Extras that are not part of the Apply flow
 
+- CA app feed: lives in RAM (`/tmp/community.applications/tempFiles/templates_new.json`) and is gone
+  after every reboot. When it is missing, `loadFeed()` calls CA's **original** `force_update()`
+  (`exec.php` line 1141, what the Apps tab runs when opened) via `webui-action.php`;
+  `appctl update-feed` does the same on demand. App IDs are assigned per download and change.
+- `prepareCA()`: the Apps page creates `/tmp/CA_logs` (`Apps.page` line 37). Without it CA's
+  `debug()` (`helpers.php` line 888) recurses until PHP runs out of memory, so every CA call failed
+  after a reboot until the Apps tab had been opened. Created before any CA call.
+
 - Autostart: the Docker page toggle POSTs `{action: 'autostart', container, wait, auto}` to
   `dynamix.docker.manager/include/UpdateConfig.php` → **original**, via `webui-action.php`
   (`setAutostart()`).

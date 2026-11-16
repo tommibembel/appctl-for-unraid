@@ -1,5 +1,6 @@
 ###2026.11.16
 - First plugin release
+- Downloads the CA app feed automatically when missing (e.g. after a reboot); `update-feed` command
 - Commands: search, info, options, install (--dry-run / --yes), version
 - Install via original CA createXML() and dockerMan postToXML()/xmlToCommand()
 - Covers the whole "Add Container" form except Tailscale (--container, --set, --set KEY.prop, --add, --remove, --autostart)

@@ -35,7 +35,9 @@ like a click in the WebUI. Details: [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Features
 
-- `search`, `info`, `options`, `install --dry-run`, `install --yes`
+- `search`, `info`, `options`, `install --dry-run`, `install --yes`, `update-feed`
+- Works right after a reboot: the Community Applications app feed is downloaded automatically
+  (no need to open the *Apps* tab)
 - **`options`** returns the whole form as data – every setting already adapted to the server, with
   required/secret/advanced flags, choice lists and problems (missing values, port conflicts with a
   free-port suggestion, name conflicts). An agent can ask the user exactly what needs deciding.

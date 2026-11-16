@@ -26,6 +26,7 @@ For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installati
 | `appctl options <app> [options]` | The *Add Container* form as data: every setting **already adapted to this server** (appdata path, network, …) plus problems (missing values, port conflicts, name conflicts) and `ready: true/false`. | no ¹ |
 | `appctl install <app> [options] --dry-run` | Shows the resulting `my-*.xml` and the `docker run` command. | no ¹ |
 | `appctl install <app> [options] --yes` | Really installs: pull image, write template, start container, optional autostart. | **yes** |
+| `appctl update-feed` | Download / refresh the CA app feed with CA's own function (what opening the *Apps* tab does). Done automatically when the feed is missing, e.g. after a reboot. | CA's feed cache in RAM |
 | `appctl version` | Tool, Unraid and CA versions. | no |
 | `appctl --help` | Short help. | no |
 
@@ -33,8 +34,9 @@ For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installati
 cache in RAM (`/tmp/community.applications/tempFiles/…`). Nothing else is written.
 
 **`<app>`** is one of:
-- an **app ID** from `search` (e.g. `1234`) – unique, but taken from the current CA feed; always
-  look it up with `search` instead of reusing an old one,
+- an **app ID** from `search` (e.g. `1234`) – unique, but only within the current CA feed: IDs
+  **change whenever the feed is downloaded again** (e.g. after a reboot or `update-feed`). Use an ID
+  right after `search`, never store it,
 - an exact **repository**, written exactly as in the template including the tag
   (e.g. `ghcr.io/example/example-app` or `example/app:latest`),
 - an exact **app name** (e.g. `example-app`).
@@ -194,7 +196,7 @@ and `config` (raw template fields).
 | 4 | ambiguous | `AMBIGUOUS` (app, with `candidates`), `AMBIGUOUS_FIELD` (field, with `fields`) |
 | 5 | required field without value | `MISSING_REQUIRED` (with `missing`) |
 | 6 | name in use | `NAME_CONFLICT` (with `conflicts`) |
-| 7 | environment / version | `CA_NOT_INSTALLED`, `FEED_MISSING`, `FEED_INVALID`, `DOCKERMAN_CHANGED` (a dockerMan function the tool calls is missing), `DOCKER_NOT_RUNNING` |
+| 7 | environment / version | `CA_NOT_INSTALLED`, `FEED_DOWNLOAD_FAILED` (no internet / DNS), `FEED_INVALID`, `DOCKERMAN_CHANGED` (a dockerMan function the tool calls is missing), `DOCKER_NOT_RUNNING` |
 | 8 | install failed | `CREATEXML_FAILED`, `UNSUPPORTED`, `PULL_FAILED`, `WRITE_FAILED`, `RUN_FAILED`, `AUTOSTART_FAILED` |
 | 9 | confirmation required | `CONFIRMATION_REQUIRED` |
 | 10 | host port in use | `PORT_CONFLICT` (with `conflicts`, each with `suggested_port`) |

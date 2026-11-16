@@ -5,8 +5,9 @@
 ## Requirements
 
 - Unraid **7.x** (tested: 7.1.2 – see [Limitations](../README.md#limitations))
-- **Community Applications** plugin installed, and the *Apps* tab opened at least once (that
-  downloads the app feed `appctl` searches in)
+- **Community Applications** plugin installed. The app feed is downloaded automatically when
+  needed (also after a reboot); opening the *Apps* tab is not required.
+- Internet access from the server (for the app feed and image pulls)
 - Docker service running
 - Shell access (SSH or the WebUI terminal) as root
 
