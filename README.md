@@ -10,11 +10,13 @@ Community Applications project.*
 **[Install](docs/INSTALL.md) · [Usage](docs/USAGE.md) · [For AI agents](AGENTS.md) · [Development](docs/DEVELOPMENT.md)**
 
 ```
-$ appctl search example-app
-$ appctl options 1234 --name example-app --set 80=8080
-$ appctl install 1234 --name example-app --set 80=8080 --dry-run
-$ appctl install 1234 --name example-app --set 80=8080 --yes
+$ appctl search example                                  # find the app's exact name
+$ appctl options example-app --set 80=8080              # all settings + problems
+$ appctl install example-app --set 80=8080 --dry-run    # preview
+$ appctl install example-app --set 80=8080 --yes        # install
 ```
+
+Apps are addressed by their name as shown by `search` (or by repository if two apps share a name).
 
 ## Why
 

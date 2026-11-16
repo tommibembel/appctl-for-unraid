@@ -40,29 +40,26 @@ For AI agents there is a short rule set in [AGENTS.md](../AGENTS.md). Installati
 cache in RAM (`/tmp/community.applications/tempFiles/…`). Nothing else is written.
 
 **`<app>`** is one of:
-- an **app ID** from `search` (e.g. `1234`) – unique, but only within the current CA feed: IDs
-  **change whenever the feed is downloaded again** (e.g. after a reboot or `update-feed`). Use an ID
-  right after `search`, never store it,
-- an exact **repository**, written exactly as in the template including the tag
-  (e.g. `ghcr.io/example/example-app` or `example/app:latest`),
-- an exact **app name** (e.g. `example-app`).
+- the exact **app name** as shown by `search` (e.g. `example-app`) – the normal case,
+- the exact **repository**, written exactly as in the template including the tag
+  (e.g. `ghcr.io/example/example-app` or `example/app:latest`) – when two apps share a name,
+- the **app ID** shown by `search` – only as a last resort: IDs are numbers CA assigns per feed
+  download and **change whenever the feed is downloaded again** (e.g. after a reboot or
+  `update-feed`). Use an ID right after `search`, never store it.
 
 If more than one template matches, nothing is guessed: the command fails with `AMBIGUOUS` and
-lists the candidates with their IDs.
+lists the candidates (name, repository, author, ID).
 
 `install` and `edit` without `--dry-run` or `--yes` do nothing and exit with `CONFIRMATION_REQUIRED`.
 
 ## Typical workflow
 
 ```
-appctl search example-app                      # find the app, note the ID
-appctl options 1234 --name example-app         # look at all settings and problems
-appctl options 1234 --name example-app \
-    --set 80=8080                                  # fix problems, repeat until "READY"
-appctl install 1234 --name example-app \
-    --set 80=8080 --dry-run                        # final preview
-appctl install 1234 --name example-app \
-    --set 80=8080 --yes                            # install
+appctl search example                          # find the app, note its exact name
+appctl options example-app                     # look at all settings and problems
+appctl options example-app --set 80=8080       # fix problems, repeat until "READY"
+appctl install example-app --set 80=8080 --dry-run   # final preview
+appctl install example-app --set 80=8080 --yes       # install
 ```
 
 `options`, `install --dry-run` and `install --yes` take **the same arguments** and run through the
@@ -165,7 +162,7 @@ With `--json` every command prints exactly one JSON object on stdout:
 
 ### `options` data
 
-Example output (illustrative, shortened) for `appctl options 1234 --name example-app --json`.
+Example output (illustrative, shortened) for `appctl options example-app --json`.
 Host port 80 is taken by the Unraid WebUI, so the template's default port conflicts:
 
 ```json
@@ -296,13 +293,13 @@ Templates that enable Tailscale are refused with `UNSUPPORTED`.
 Search and inspect:
 ```
 appctl search example --limit 5
-appctl info 1234
+appctl info example-app
 ```
 
 Install on a custom network with a fixed IP, drop a placeholder field, load secrets from an env
 file instead of the template, enable autostart:
 ```
-appctl install 1234 --name example-app --network br0 --ip 192.168.1.20 \
+appctl install example-app --network br0 --ip 192.168.1.20 \
     --remove EXAMPLE_API_TOKEN \
     --container ExtraParams="--env-file /mnt/user/appdata/example-app/secrets.env" \
     --autostart --dry-run
@@ -310,7 +307,7 @@ appctl install 1234 --name example-app --network br0 --ip 192.168.1.20 \
 
 Replace a hand-made container/template with the proper CA template (same name):
 ```
-appctl install 1234 --name example-app --replace ... --yes
+appctl install example-app --replace ... --yes
 ```
 
 Add a read-only path and a label, change a field's display:
@@ -328,6 +325,6 @@ appctl edit example-app --remove EXAMPLE_API_TOKEN --template-only --yes
 
 Agent-style JSON:
 ```
-appctl options 1234 --name example-app --json | jq '.data.problems'
-appctl install 1234 --name example-app --set 80=8080 --yes --json | jq '.data.steps'
+appctl options example-app --json | jq '.data.problems'
+appctl install example-app --set 80=8080 --yes --json | jq '.data.steps'
 ```

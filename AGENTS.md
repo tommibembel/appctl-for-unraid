@@ -29,9 +29,10 @@ Always read `warnings` and pass relevant ones on to the user.
 1. **Never install without the user's explicit confirmation.** Show the user what will be
    installed (`install … --dry-run`), wait for a clear "yes", then run the identical command
    with `--yes` instead of `--dry-run`.
-2. **Never guess.** If `<app>` is ambiguous, show the candidates (name, repository, author, ID)
-   and let the user choose. Use the **ID** from then on – within this task only: IDs change when the
-   CA feed is downloaded again (e.g. after a reboot). The exact repository is stable.
+2. **Never guess.** Address apps by their exact **name** from `search`. If that is ambiguous, show
+   the candidates (name, repository, author) and let the user choose; then use the exact
+   **repository**. Only if the repository is ambiguous too, use the ID – right away, within this
+   task: IDs change whenever the CA feed is downloaded again (e.g. after a reboot).
 3. **Ask, don't invent.** Values the user has to decide (passwords, domains, host paths for
    their data, ports when there is a conflict) come from the user. Defaults that `options`
    already filled in may be kept – say that you keep them.
@@ -54,18 +55,19 @@ Always read `warnings` and pass relevant ones on to the user.
 
 ```
 1. search      appctl search <term> --json
-               -> pick the app with the user; remember its "id"
-2. options     appctl options <id> --name <name> [--network …] --json
+               -> pick the app with the user; use its exact "name"
+                  (on AMBIGUOUS: its "repository", see rule 2)
+2. options     appctl options <app> --name <name> [--network …] --json
                -> loop:
                   - data.problems empty and data.ready == true  -> step 3
                   - otherwise ask the user about each problem and about the
                     non-advanced fields they may want to change, then re-run
                     options with the answers (same arguments + new ones)
-3. preview     appctl install <id> <same arguments> --dry-run --json
+3. preview     appctl install <app> <same arguments> --dry-run --json
                -> show the user: name, image (data.repository), network/IP,
                   ports, paths, variables (no secrets), autostart
 4. confirm     wait for the user's "yes"
-5. install     appctl install <id> <same arguments> --yes --json
+5. install     appctl install <app> <same arguments> --yes --json
                -> report data.steps; on error report error.message and stop
 ```
 
@@ -99,7 +101,7 @@ What to ask in step 2 – keep it short:
 
 | `error.code` | Action |
 |---|---|
-| `AMBIGUOUS` | Show `error.candidates`, let the user choose, use the ID. |
+| `AMBIGUOUS` | Show `error.candidates`, let the user choose, use its exact repository (ID only if that is ambiguous too). |
 | `NOT_FOUND` | Run `search` with a broader term (`edit`: check the container name). |
 | `NO_TEMPLATE` | The container was not created via the Docker page / CA; it cannot be edited with the tool – tell the user. |
 | `INVALID_COMMAND` | `ExtraParams`/`PostArgs` break the shell command. Move labels/variables into fields (`--add Label:…`), fix the rest with `--container ExtraParams=…`. |
@@ -124,7 +126,7 @@ What to ask in step 2 – keep it short:
   second time, so quote twice or pass the command via a heredoc:
   ```
   ssh <unraid-host> bash -s <<'EOF'
-  appctl install 1234 --name example-app \
+  appctl install example-app \
     --container ExtraParams="--env-file /mnt/user/appdata/example-app/secrets.env" \
     --set 'APP_TITLE=My "special" server' --dry-run --json
   EOF

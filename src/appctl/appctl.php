@@ -82,7 +82,8 @@ Usage:
   appctl update-feed [--json]                    download / refresh the CA app feed (done automatically when missing)
   appctl version [--json]
 
-<app> is an exact app name, an app ID from `search`, or an exact repository (e.g. ghcr.io/example/app:latest).
+<app> is the exact app name from `search`; if two apps share it, the exact repository
+(e.g. ghcr.io/example/app:latest). App IDs from `search` work too, but change with every feed download.
 
 Options for `options`, `install` and `edit` (cover everything the WebUI "Add Container" / Edit form
 can do, except Tailscale):
@@ -308,7 +309,7 @@ function resolveApp(array $feed, string $app): array {
   if (count($byName) === 1) return $byName[0];
   $cands = $byRepo ?: $byName;
   if (count($cands) > 1) {
-    throw new AppctlError('AMBIGUOUS', "'$app' matches ".count($cands)." templates; use the ID or the exact repository",
+    throw new AppctlError('AMBIGUOUS', "'$app' matches ".count($cands)." templates; use the exact repository (or the ID)",
       EXIT_AMBIGUOUS, ['candidates' => array_map('summary', $cands)]);
   }
   throw new AppctlError('NOT_FOUND', "No app named '$app' found (try: appctl search $app)", EXIT_NOT_FOUND);
